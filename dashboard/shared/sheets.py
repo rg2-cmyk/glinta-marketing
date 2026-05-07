@@ -1,17 +1,15 @@
 """
 Google Sheets sync for Glinta campaign data.
-Uses service account impersonation (no key file needed).
 
-Requirements:
-    pip install gspread google-auth
-
-Auth setup (one-time):
-    gcloud auth application-default login
+Read path: public CSV export (no auth needed — sheet must be "Anyone with link - Viewer").
+Write path: gcloud ADC + impersonation (local dev only; writes are no-ops on Streamlit Cloud).
 """
 
 import datetime
 import json
 import gspread
+import pandas as pd
+import requests
 from google.auth import default, impersonated_credentials
 from google.oauth2 import service_account
 
@@ -22,6 +20,8 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
+# Public CSV export URL for sheet1 (gid=0) — works when sheet is "Anyone with link - Viewer"
+_CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid=0"
 
 COLUMNS = [
     # ── Planning ──────────────────────────────────────────────────
@@ -38,20 +38,20 @@ COLUMNS = [
     "last_saved",
 ]
 
-# ── Auth ──────────────────────────────────────────────────────────────────────
+# ── Read via public CSV (no auth) ─────────────────────────────────────────────
+def _read_sheet_csv() -> list[list]:
+    """Fetch sheet1 as a list-of-rows via the public CSV export URL."""
+    resp = requests.get(_CSV_URL, timeout=15)
+    resp.raise_for_status()
+    from io import StringIO
+    df = pd.read_csv(StringIO(resp.text), dtype=str, keep_default_na=False)
+    header = df.columns.tolist()
+    rows = df.values.tolist()
+    return [header] + rows
+
+
+# ── Auth (write path, local dev only) ─────────────────────────────────────────
 def _get_client():
-    # On Streamlit Cloud: use service account key stored in st.secrets
-    try:
-        import streamlit as st
-        if "gcp_service_account" in st.secrets:
-            creds = service_account.Credentials.from_service_account_info(
-                dict(st.secrets["gcp_service_account"]),
-                scopes=SCOPES,
-            )
-            return gspread.authorize(creds)
-    except Exception:
-        pass
-    # Local dev: use gcloud ADC + impersonation
     source_creds, _ = default()
     target_creds = impersonated_credentials.Credentials(
         source_credentials=source_creds,
@@ -60,6 +60,15 @@ def _get_client():
         lifetime=3600,
     )
     return gspread.authorize(target_creds)
+
+
+def _writes_available() -> bool:
+    """True only when running locally with gcloud ADC configured."""
+    try:
+        _get_client()
+        return True
+    except Exception:
+        return False
 
 
 REMOVED_SHEET_NAME = "Removed Campaigns"
@@ -167,12 +176,10 @@ def _campaign_to_row(c: dict) -> list:
 # ── Public API ────────────────────────────────────────────────────────────────
 def load_planned_campaigns() -> list[dict]:
     """
-    Read all campaigns from the sheet and return them as plan_added-compatible dicts.
-    Each dict has the same shape as entries added via Planning → Plan a Campaign.
-    Campaigns with decisioning fields also include a 'decisioning' sub-dict.
+    Read all campaigns from the sheet via public CSV export (no auth required).
+    Sheet must be shared as "Anyone with link - Viewer".
     """
-    sheet = _get_sheet()
-    data = sheet.get_all_values()
+    data = _read_sheet_csv()
 
     if not data or len(data) < 2:
         return []
@@ -278,9 +285,14 @@ def sync_all_campaigns(campaigns: list[dict]) -> None:
 def remove_campaign(campaign: dict) -> None:
     """
     Move a campaign from sheet1 to the 'Removed Campaigns' worksheet.
-    Uses a single workbook connection so both operations share one auth session.
-    Raises on any error so the caller can surface it to the user.
+    No-op when gcloud ADC is not available (e.g. Streamlit Cloud).
     """
+    try:
+        _get_client()  # raises if auth unavailable
+    except Exception:
+        print("[sheets] remove_campaign: write auth unavailable, skipping.")
+        return
+
     campaign_id = campaign.get("id", "")
     removed_at  = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     removed_row = _campaign_to_row(campaign) + [removed_at]
@@ -348,10 +360,14 @@ def load_all_campaigns() -> tuple:
 def upsert_campaign(campaign: dict) -> None:
     """
     Insert or update a single campaign row, matched by id.
-    Updates in-place if id exists, appends if new.
-    Also re-writes the header if columns have changed.
+    No-op when gcloud ADC is not available (e.g. Streamlit Cloud).
     """
-    sheet = _get_sheet()
+    try:
+        sheet = _get_sheet()
+    except Exception:
+        print("[sheets] upsert_campaign: write auth unavailable, skipping.")
+        return
+
     data = sheet.get_all_values()
 
     if not data:
@@ -359,13 +375,11 @@ def upsert_campaign(campaign: dict) -> None:
         print(f"[sheets] Created sheet with header + campaign {campaign['id']}.")
         return
 
-    # Always keep header in sync with COLUMNS definition
     if data[0] != COLUMNS:
         sheet.update("A1", [COLUMNS])
         data[0] = COLUMNS
         print("[sheets] Header updated.")
 
-    # Find existing row by id
     id_col = COLUMNS.index("id")
     campaign_id = campaign["id"]
     for i, row in enumerate(data[1:], start=2):
@@ -374,7 +388,6 @@ def upsert_campaign(campaign: dict) -> None:
             print(f"[sheets] Updated campaign {campaign_id} at row {i}.")
             return
 
-    # Not found — append
     sheet.append_row(_campaign_to_row(campaign))
     print(f"[sheets] Appended new campaign {campaign_id}.")
 
