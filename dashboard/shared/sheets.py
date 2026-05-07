@@ -34,10 +34,15 @@ COLUMNS = [
     "freq_cap", "freq_cap_custom",
     "suppressions", "suppressions_custom",
     "flow_target", "flow_priority", "flow_priority_custom",
-    "flow_msg_overrides",
-    "refinements",
-    "last_saved",
-    "last_modified_by",
+    "flow_msg_overrides", "refinements",
+    # ── Generation / Copy ─────────────────────────────────────────
+    "copy_status", "copy_subject", "copy_email", "copy_sms",
+    "copy_tone", "copy_cta", "copy_offer",
+    "copy_saved_by", "copy_saved_at", "copy_reviewer",
+    # ── Brief Review ──────────────────────────────────────────────
+    "brief_status", "brief_approved_by", "brief_approved_at",
+    # ── Meta ──────────────────────────────────────────────────────
+    "last_saved", "last_modified_by",
 ]
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -46,36 +51,40 @@ def _get_client():
     Return an authenticated gspread client.
 
     Path 1 — Streamlit Secrets (Streamlit Cloud):
-        Add a [gcp_service_account] section to your app's Secrets with the full
-        contents of the service-account JSON file. Example structure:
-            [gcp_service_account]
-            type = "service_account"
-            project_id = "..."
-            private_key_id = "..."
-            private_key = "-----BEGIN RSA PRIVATE KEY-----\\n...\\n-----END RSA PRIVATE KEY-----\\n"
-            client_email = "..."
-            ...
+        Add a [gcp_user_credentials] section to your app's Secrets with:
+            refresh_token, client_id, client_secret
+        from ~/.config/gcloud/application_default_credentials.json.
+        Uses your OAuth credentials directly — no service account key needed.
 
     Path 2 — gcloud ADC (local dev):
         Run `gcloud auth application-default login` once; no further config needed.
     """
-    # ── Path 1: Streamlit Secrets ─────────────────────────────────────────────
+    # ── Path 1: Streamlit Secrets — direct user OAuth (no impersonation) ────────
+    # Using user credentials directly is more reliable on Streamlit Cloud than
+    # impersonation, which can fail if the IAM token endpoint is unreachable.
+    _secrets_configured = False
     try:
         import streamlit as st
-        # We're in a Streamlit context — only use configured secrets, never fall through to ADC
-        if "gcp_service_account" in st.secrets:
-            creds = service_account.Credentials.from_service_account_info(
-                dict(st.secrets["gcp_service_account"]),
-                scopes=SCOPES,
+        if hasattr(st, "secrets") and "gcp_user_credentials" in st.secrets:
+            _secrets_configured = True
+            from google.oauth2.credentials import Credentials as _OAuthCreds
+            _s = st.secrets["gcp_user_credentials"]
+            creds = _OAuthCreds(
+                token=None,
+                refresh_token=_s["refresh_token"],
+                client_id=_s["client_id"],
+                client_secret=_s["client_secret"],
+                token_uri="https://oauth2.googleapis.com/token",
             )
             return gspread.authorize(creds)
-        raise RuntimeError("Google Sheets not connected.")
-    except RuntimeError:
-        raise
-    except Exception:
-        pass  # no Streamlit context — fall through to local ADC
+    except ImportError:
+        pass  # streamlit not importable — fall through to ADC
+    except Exception as _e:
+        if _secrets_configured:
+            # Secrets were found but auth failed — surface this rather than silently failing
+            raise RuntimeError(f"Google Sheets: Streamlit Secrets auth failed — {_e}") from _e
 
-    # ── Path 2: gcloud Application Default Credentials ────────────────────────
+    # ── Path 2: gcloud Application Default Credentials (local dev) ────────────
     try:
         source_creds, _ = default()
         target_creds = impersonated_credentials.Credentials(
@@ -87,7 +96,8 @@ def _get_client():
         return gspread.authorize(target_creds)
     except Exception as e:
         raise RuntimeError(
-            "Google Sheets not connected. Add [gcp_service_account] to Streamlit Secrets."
+            "Google Sheets not connected. Run `gcloud auth application-default login` "
+            "or add [gcp_user_credentials] to Streamlit Secrets."
         ) from e
 
 
@@ -157,6 +167,25 @@ def _campaign_to_row(c: dict) -> list:
 
     refinements = _join(dec.get("refinements", []))
 
+    # Copy / Generation fields — stored in c["copy"] sub-dict
+    copy = c.get("copy") or {}
+    copy_status    = copy.get("status", "")
+    copy_subject   = copy.get("subject", c.get("subject", c.get("subject_line_draft", "")))
+    copy_email     = copy.get("email", "")
+    copy_sms       = copy.get("sms", "")
+    copy_tone      = copy.get("tone", "")
+    copy_cta       = copy.get("cta", "")
+    copy_offer     = copy.get("offer", "")
+    copy_saved_by  = copy.get("saved_by", "")
+    copy_saved_at  = copy.get("saved_at", "")
+    copy_reviewer  = copy.get("reviewer", "")
+
+    # Brief review fields — stored in c["brief_review"] sub-dict
+    brief = c.get("brief_review") or {}
+    brief_status      = brief.get("status", "")
+    brief_approved_by = brief.get("approved_by", "")
+    brief_approved_at = brief.get("approved_at", "")
+
     last_saved = dec.get("last_saved", c.get("last_saved", ""))
     if isinstance(last_saved, datetime.datetime):
         last_saved = last_saved.strftime("%Y-%m-%d %H:%M:%S")
@@ -189,6 +218,22 @@ def _campaign_to_row(c: dict) -> list:
         flow_priority_custom,
         flow_msg_overrides,
         refinements,
+        # Generation / Copy
+        copy_status,
+        copy_subject,
+        copy_email,
+        copy_sms,
+        copy_tone,
+        copy_cta,
+        copy_offer,
+        copy_saved_by,
+        copy_saved_at,
+        copy_reviewer,
+        # Brief Review
+        brief_status,
+        brief_approved_by,
+        brief_approved_at,
+        # Meta
         last_saved,
         c.get("last_modified_by", ""),
     ]
@@ -350,6 +395,42 @@ def load_planned_campaigns() -> list[dict]:
                 "send_time":            send_time,
                 "last_saved":           last_saved,
                 "saved_by":             last_modified_by,
+            }
+
+        # Copy / Generation fields
+        copy_status   = _col(row, "copy_status")
+        copy_subject  = _col(row, "copy_subject")
+        copy_email    = _col(row, "copy_email")
+        copy_sms      = _col(row, "copy_sms")
+        copy_tone     = _col(row, "copy_tone")
+        copy_cta      = _col(row, "copy_cta")
+        copy_offer    = _col(row, "copy_offer")
+        copy_saved_by = _col(row, "copy_saved_by")
+        copy_saved_at = _col(row, "copy_saved_at")
+        copy_reviewer = _col(row, "copy_reviewer")
+        if any([copy_status, copy_email, copy_sms]):
+            camp["copy"] = {
+                "status":   copy_status,
+                "subject":  copy_subject,
+                "email":    copy_email,
+                "sms":      copy_sms,
+                "tone":     copy_tone,
+                "cta":      copy_cta,
+                "offer":    copy_offer,
+                "saved_by": copy_saved_by,
+                "saved_at": copy_saved_at,
+                "reviewer": copy_reviewer,
+            }
+
+        # Brief review fields
+        brief_status      = _col(row, "brief_status")
+        brief_approved_by = _col(row, "brief_approved_by")
+        brief_approved_at = _col(row, "brief_approved_at")
+        if any([brief_status, brief_approved_by]):
+            camp["brief_review"] = {
+                "status":      brief_status,
+                "approved_by": brief_approved_by,
+                "approved_at": brief_approved_at,
             }
 
         campaigns.append(camp)
