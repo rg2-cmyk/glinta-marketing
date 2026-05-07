@@ -60,6 +60,11 @@ def _fetch_sheet_campaigns():
     try:
         planned, drafts = _sheets_load_all()
         return planned, drafts, None
+    except RuntimeError as _e:
+        msg = str(_e)
+        if "not connected" in msg.lower() or "not configured" in msg.lower():
+            return None, None, None  # silently skip — no credentials set up
+        return None, None, msg
     except Exception as _e:
         return None, None, str(_e)
 
