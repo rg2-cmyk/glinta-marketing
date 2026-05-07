@@ -266,56 +266,62 @@ def top_nav(current_page):
         ("pages/5_Execution.py",   "QA Review"),
     ]
 
-    # Style page_link elements to look like the existing nav design
-    st.markdown("""
-<style>
-div[data-testid="stPageLink"] > a {
-    text-decoration: none !important;
-    background: transparent !important;
-    padding: 0 !important;
-    border-radius: 0 !important;
-}
-div[data-testid="stPageLink"] > a > span[data-testid="stPageLinkIcon"] {
-    display: none !important;
-}
-div[data-testid="stPageLink"] > a > p {
-    font-family: 'Barlow', sans-serif !important;
-    font-size: 0.82rem !important;
-    font-weight: 400 !important;
-    color: #aaaaaa !important;
-    margin: 0 !important;
-    padding: 10px 0 !important;
-    white-space: nowrap !important;
-    border-bottom: 2px solid transparent;
-    transition: color 0.15s;
-}
-div[data-testid="stPageLink"] > a:hover > p {
-    color: #000000 !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
-    # Proportional widths so longer labels don't truncate
-    col_weights = [1.2, 1.8, 1.0, 1.3, 1.7, 1.0, 1.1]
-    cols = st.columns(col_weights, gap="small")
-    for col, (page_path, label) in zip(cols, pages):
+    # Build the original pixel-perfect HTML visual nav.
+    # Non-current items use onclick to trigger hidden st.page_link() anchors
+    # so navigation goes through Streamlit's WebSocket (no full page reload).
+    items = ""
+    for i, (_, label) in enumerate(pages):
         is_current = (label.lower() == current_page.lower())
-        with col:
-            if is_current:
-                st.markdown(
-                    f'<div style="padding:10px 0;border-bottom:2px solid {COLORS["black"]};display:inline-block;">'
-                    f'<span style="font-family:\'Barlow\',sans-serif;font-size:0.82rem;'
-                    f'font-weight:600;color:{COLORS["black"]};white-space:nowrap;">{label}</span>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-            else:
-                st.page_link(page_path, label=label, icon=None)
+        if is_current:
+            items += (
+                f'<span style="font-family:\'Barlow\',sans-serif;font-size:0.82rem;'
+                f'font-weight:600;color:{COLORS["black"]};padding:10px 0;'
+                f'border-bottom:2px solid {COLORS["black"]};white-space:nowrap;">'
+                f'{label}</span>'
+            )
+        else:
+            items += (
+                f'<span onclick="__stNav({i})" '
+                f'style="font-family:\'Barlow\',sans-serif;font-size:0.82rem;'
+                f'font-weight:400;color:#aaaaaa;padding:10px 0;'
+                f'border-bottom:2px solid transparent;white-space:nowrap;'
+                f'cursor:pointer;transition:color 0.15s;" '
+                f'onmouseover="this.style.color=\'#000000\'" '
+                f'onmouseout="this.style.color=\'#aaaaaa\'">'
+                f'{label}</span>'
+            )
+
+    labels_js = str([label for _, label in pages]).replace("'", '"')
+    current_lower = current_page.lower()
 
     st.markdown(
-        f'<div style="border-bottom:1px solid {COLORS["border"]};margin-bottom:1.75rem;margin-top:-0.75rem;"></div>',
+        f'<div style="display:flex;gap:28px;align-items:flex-end;'
+        f'border-bottom:1px solid {COLORS["border"]};margin-bottom:1.75rem;'
+        f'padding-bottom:0;">{items}</div>'
+        f'<style>'
+        f'div[data-testid="stPageLink"]{{position:absolute;left:-9999px;top:-9999px;}}'
+        f'</style>'
+        f'<script>'
+        f'function __stNav(idx){{'
+        f'  var labels={labels_js};'
+        f'  var cur="{current_lower}";'
+        f'  var links=document.querySelectorAll(\'[data-testid="stPageLink"] a\');'
+        f'  var li=0;'
+        f'  for(var i=0;i<labels.length;i++){{'
+        f'    if(labels[i].toLowerCase()===cur)continue;'
+        f'    if(i===idx){{if(links[li])links[li].click();return;}}'
+        f'    li++;'
+        f'  }}'
+        f'}}'
+        f'</script>',
         unsafe_allow_html=True,
     )
+
+    # Hidden st.page_link() elements — positioned off-screen via CSS above,
+    # but still live in the DOM so JS can .click() them for soft navigation.
+    for i, (page_path, label) in enumerate(pages):
+        if label.lower() != current_page.lower():
+            st.page_link(page_path, label=label, icon=None)
 
 
 def phase_stepper(current_phase):
