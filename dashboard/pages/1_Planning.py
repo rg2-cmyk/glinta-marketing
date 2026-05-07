@@ -1965,9 +1965,10 @@ with tab_upcoming:
             st.toast("Synced from Google Sheets ✓", icon="🔄")
         return True
 
-    # Auto-sync on first render of this tab
+    # Auto-sync on first render of this tab, then rerun so data is visible
     if st.session_state.get("_last_sheet_sync") is None:
-        _do_sheet_sync()
+        if _do_sheet_sync():
+            st.rerun()
 
     # ── Sync status bar ───────────────────────────────────────────────────────
     _sync_err = st.session_state.get("_sheet_sync_error")
