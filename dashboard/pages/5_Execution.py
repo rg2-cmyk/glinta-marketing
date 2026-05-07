@@ -12,7 +12,81 @@ from shared.data import load_data, load_segments, fmt_revenue
 
 inject_css()
 top_nav("QA Review")
+
+# Seed plan_added from sheet if Planning hasn't synced yet this session
+if st.session_state.get("_last_sheet_sync") is None:
+    try:
+        from shared.sheets import load_all_campaigns as _load_all
+        _p, _d = _load_all()
+        st.session_state["plan_added"]  = _p
+        st.session_state["plan_drafts"] = _d
+        st.session_state["_last_sheet_sync"] = date.today()
+    except Exception:
+        st.session_state.setdefault("plan_added", [])
+        st.session_state.setdefault("plan_drafts", [])
+
 st.markdown("<h1>QA Review</h1>", unsafe_allow_html=True)
+
+# ── Data connectors ───────────────────────────────────────────────────────────
+_QA_CONNECTIONS = [
+    {
+        "name":   "Klaviyo",
+        "abbr":   "KL",
+        "color":  "#1a1a1a",
+        "status": "mock data",
+        "what":   "Finalized campaign decisions — segments, email body, suppressions, send time, frequency caps",
+        "why":    "Pulls the live campaign record into QA so checks run against exactly what Klaviyo will send",
+    },
+    {
+        "name":   "Litmus",
+        "abbr":   "LI",
+        "color":  "#FF5722",
+        "status": "not connected",
+        "what":   "Cross-client render tests — Gmail, Outlook, Apple Mail, dark mode, mobile",
+        "why":    "Replaces the manual render checks below with live screenshots across 90+ email clients",
+    },
+    {
+        "name":   "Shopify",
+        "abbr":   "SH",
+        "color":  "#96bf48",
+        "status": "not connected",
+        "what":   "Live product URLs and inventory status at send time",
+        "why":    "Confirms links resolve to in-stock products and UTM params are appended correctly",
+    },
+]
+_QA_STATUS_STYLE = {
+    "mock data":     ("background:#f5f000;color:#000;",  "Mock data"),
+    "connected":     ("background:#caf30b;color:#000;",  "Connected"),
+    "not connected": ("background:#f2f2f2;color:#888;",  "Not connected"),
+    "tbd":           ("background:#e8c5ff;color:#000;",  "TBD"),
+}
+_qa_conn_html = (
+    '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px;">'
+)
+for _c in _QA_CONNECTIONS:
+    _st_css, _st_lbl = _QA_STATUS_STYLE.get(_c["status"], ("background:#eee;color:#666;", _c["status"]))
+    _qa_conn_html += (
+        f'<div style="border:1.5px solid #e4e4e4;border-radius:8px;padding:12px 14px;background:#fff;">'
+        f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">'
+        f'<span style="background:{_c["color"]};color:#fff;border-radius:5px;'
+        f'width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;'
+        f'font-family:\'Barlow Condensed\',sans-serif;font-size:10px;font-weight:900;'
+        f'letter-spacing:0.04em;flex-shrink:0;">{_c["abbr"]}</span>'
+        f'<span style="font-family:\'Barlow Condensed\',sans-serif;font-size:13px;'
+        f'font-weight:800;letter-spacing:0.04em;color:#000;">{_c["name"]}</span>'
+        f'<span style="margin-left:auto;{_st_css}border-radius:4px;padding:1px 7px;'
+        f'font-size:9px;font-weight:700;white-space:nowrap;font-family:Barlow,sans-serif;'
+        f'letter-spacing:0.04em;text-transform:uppercase;">{_st_lbl}</span>'
+        f'</div>'
+        f'<div style="font-family:Barlow,sans-serif;font-size:11px;font-weight:600;'
+        f'color:#000;margin-bottom:3px;line-height:1.4;">{_c["what"]}</div>'
+        f'<div style="font-family:Barlow,sans-serif;font-size:10px;color:#888;line-height:1.4;">'
+        f'{_c["why"]}</div>'
+        f'</div>'
+    )
+_qa_conn_html += '</div>'
+st.markdown(_qa_conn_html, unsafe_allow_html=True)
+st.divider()
 
 # ── Pull upcoming campaigns the same way Generation does (data + plan_added) ──
 campaigns_df, *_ = load_data()
@@ -154,6 +228,22 @@ camp = all_campaigns[camp_labels.index(chosen_label)]
 st.session_state["active_campaign_id"] = camp["id"]
 campaign_context_card(camp)
 
+# ── Disclaimer note ───────────────────────────────────────────────────────────
+st.markdown(f"""
+<div style="background:{COLORS['offwhite']};border:1px solid {COLORS['border']};
+            border-left:3px solid {COLORS['black']};border-radius:6px;
+            padding:10px 14px;margin-bottom:14px;display:flex;align-items:flex-start;gap:10px;">
+  <span style="font-size:0.85rem;flex-shrink:0;margin-top:1px;">ℹ️</span>
+  <span style="font-family:'Barlow',sans-serif;font-size:0.78rem;line-height:1.45;
+               color:{COLORS['black']};">
+    <strong>QA &amp; review in Copilot is designed to assist the human QA process — not replace it.</strong>
+    Automated checks flag common issues but cannot substitute for human judgment on brand voice,
+    legal compliance, or final creative approval.
+  </span>
+</div>
+""", unsafe_allow_html=True)
+
+st.divider()
 
 # ── Resolve copy + subject + preview from prior phases (session state) ────────
 def _resolve_subject(camp):
@@ -210,133 +300,127 @@ sender     = "Glinta <hello@studs.com>"
 # ══════════════════════════════════════════════════════════════════════════════
 # CREATIVE PREVIEW (copy + design pulled from prior phases)
 # ══════════════════════════════════════════════════════════════════════════════
-st.markdown("<h2>Creative Preview</h2>", unsafe_allow_html=True)
-st.markdown(
-    f'<p style="font-family:\'Barlow\',sans-serif;font-size:0.82rem;color:#666;'
-    f'margin:-0.4rem 0 1rem;">Pulled from Generation (copy) and Design (layout & assets) — '
-    f'this is what QA is reviewing.</p>',
-    unsafe_allow_html=True,
-)
+with st.expander("Creative Preview — pulled from Generation & Design", expanded=True):
+    prev_col_l, prev_col_r = st.columns([3, 2], gap="large")
 
-prev_col_l, prev_col_r = st.columns([3, 2], gap="large")
-
-with prev_col_l:
-    # Email or SMS render mock — depends on channel
-    if camp["channel"] == "email":
-        body_html = (email_body or "").replace("\n", "<br>")
-        st.markdown(f"""
-        <div style="border:1px solid {COLORS['border']};border-radius:10px;
-                    background:{COLORS['white']};overflow:hidden;
-                    font-family:'Barlow',sans-serif;">
-          <!-- Inbox header -->
-          <div style="background:{COLORS['offwhite']};padding:10px 14px;
-                      border-bottom:1px solid {COLORS['border']};font-size:0.7rem;
-                      color:{COLORS['muted']};">
-            <div><strong style="color:{COLORS['black']};">From:</strong> {sender}</div>
-            <div style="margin-top:2px;">
-              <strong style="color:{COLORS['black']};">Subject:</strong>
-              <span style="color:{COLORS['black']};">{subject_text or '(no subject)'}</span>
+    with prev_col_l:
+        # Email or SMS render mock — depends on channel
+        if camp["channel"] == "email":
+            body_html = (email_body or "").replace("\n", "<br>")
+            st.markdown(f"""
+            <div style="border:1px solid {COLORS['border']};border-radius:10px;
+                        background:{COLORS['white']};overflow:hidden;
+                        font-family:'Barlow',sans-serif;">
+              <!-- Inbox header -->
+              <div style="background:{COLORS['offwhite']};padding:10px 14px;
+                          border-bottom:1px solid {COLORS['border']};font-size:0.7rem;
+                          color:{COLORS['muted']};">
+                <div><strong style="color:{COLORS['black']};">From:</strong> {sender}</div>
+                <div style="margin-top:2px;">
+                  <strong style="color:{COLORS['black']};">Subject:</strong>
+                  <span style="color:{COLORS['black']};">{subject_text or '(no subject)'}</span>
+                </div>
+                <div style="margin-top:2px;font-style:italic;">{preview_text}</div>
+              </div>
+              <!-- Hero placeholder -->
+              <div style="height:140px;background:{COLORS['offwhite']};
+                          border-bottom:1px solid {COLORS['border']};
+                          display:flex;flex-direction:column;align-items:center;
+                          justify-content:center;text-align:center;padding:0 20px;gap:6px;">
+                <div style="font-size:0.65rem;letter-spacing:0.1em;text-transform:uppercase;
+                            color:{COLORS['muted']};">Hero image · 600×400</div>
+                <div style="font-size:0.65rem;color:#BBBBBB;font-style:italic;
+                            line-height:1.35;">{hero_alt}</div>
+              </div>
+              <!-- Body copy -->
+              <div style="padding:18px 22px;font-size:0.85rem;line-height:1.55;
+                          color:{COLORS['black']};">
+                {body_html}
+              </div>
+              <!-- CTA -->
+              <div style="padding:0 22px 18px;">
+                <a style="display:inline-block;background:{COLORS['black']};color:{COLORS['white']};
+                          padding:10px 22px;border-radius:4px;font-family:'Barlow Condensed',sans-serif;
+                          font-weight:700;letter-spacing:0.06em;text-transform:uppercase;
+                          font-size:0.8rem;text-decoration:none;">{cta_label}</a>
+                <div style="font-size:0.62rem;color:{COLORS['muted']};margin-top:6px;
+                            font-family:'Barlow',sans-serif;">→ {cta_url}</div>
+              </div>
+              <!-- Footer -->
+              <div style="border-top:1px solid {COLORS['border']};padding:10px 22px;
+                          font-size:0.62rem;color:{COLORS['muted']};">
+                Glinta · NYC · You can <u>unsubscribe</u> or <u>manage preferences</u>.
+              </div>
             </div>
-            <div style="margin-top:2px;font-style:italic;">{preview_text}</div>
-          </div>
-          <!-- Hero -->
-          <div style="height:160px;background:linear-gradient(135deg,#1a1a1a 0%,#2a2a2a 100%);
-                      display:flex;align-items:center;justify-content:center;
-                      color:#888;font-size:0.7rem;letter-spacing:0.08em;
-                      text-transform:uppercase;text-align:center;padding:0 20px;">
-            [ Hero image · 600×400 ]<br><span style="font-size:0.65rem;color:#666;
-            text-transform:none;letter-spacing:0;font-style:italic;
-            margin-top:6px;display:block;">{hero_alt}</span>
-          </div>
-          <!-- Body copy -->
-          <div style="padding:18px 22px;font-size:0.85rem;line-height:1.55;
-                      color:{COLORS['black']};">
-            {body_html}
-          </div>
-          <!-- CTA -->
-          <div style="padding:0 22px 18px;">
-            <a style="display:inline-block;background:{COLORS['black']};color:{COLORS['white']};
-                      padding:10px 22px;border-radius:4px;font-family:'Barlow Condensed',sans-serif;
-                      font-weight:700;letter-spacing:0.06em;text-transform:uppercase;
-                      font-size:0.8rem;text-decoration:none;">{cta_label}</a>
-            <div style="font-size:0.62rem;color:{COLORS['muted']};margin-top:6px;
-                        font-family:'Barlow',sans-serif;">→ {cta_url}</div>
-          </div>
-          <!-- Footer -->
-          <div style="border-top:1px solid {COLORS['border']};padding:10px 22px;
-                      font-size:0.62rem;color:{COLORS['muted']};">
-            Glinta · NYC · You can <u>unsubscribe</u> or <u>manage preferences</u>.
-          </div>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        sms_html = (sms_body or "").replace("\n", "<br>")
-        st.markdown(f"""
-        <div style="background:{COLORS['offwhite']};border:1px solid {COLORS['border']};
-                    border-radius:10px;padding:24px 18px;display:flex;justify-content:center;
-                    font-family:'Barlow',sans-serif;">
-          <div style="max-width:300px;">
-            <div style="font-size:0.62rem;color:{COLORS['muted']};text-align:center;
-                        margin-bottom:6px;letter-spacing:0.08em;text-transform:uppercase;">
-              Glinta · {camp['send_date'].strftime('%b %d, %I:%M %p')}
+            """, unsafe_allow_html=True)
+        else:
+            sms_html = (sms_body or "").replace("\n", "<br>")
+            st.markdown(f"""
+            <div style="background:{COLORS['offwhite']};border:1px solid {COLORS['border']};
+                        border-radius:10px;padding:24px 18px;display:flex;justify-content:center;
+                        font-family:'Barlow',sans-serif;">
+              <div style="max-width:300px;">
+                <div style="font-size:0.62rem;color:{COLORS['muted']};text-align:center;
+                            margin-bottom:6px;letter-spacing:0.08em;text-transform:uppercase;">
+                  Glinta · {camp['send_date'].strftime('%b %d, %I:%M %p')}
+                </div>
+                <div style="background:{COLORS['white']};border:1px solid {COLORS['border']};
+                            border-radius:18px 18px 18px 4px;padding:12px 16px;
+                            font-size:0.85rem;line-height:1.45;color:{COLORS['black']};">
+                  {sms_html}
+                </div>
+              </div>
             </div>
-            <div style="background:{COLORS['white']};border:1px solid {COLORS['border']};
-                        border-radius:18px 18px 18px 4px;padding:12px 16px;
-                        font-size:0.85rem;line-height:1.45;color:{COLORS['black']};">
-              {sms_html}
-            </div>
-          </div>
-        </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
 
-with prev_col_r:
-    st.markdown(
-        f'<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:0.7rem;'
-        f'letter-spacing:0.08em;text-transform:uppercase;color:{COLORS["muted"]};'
-        f'margin-bottom:8px;">Send manifest</div>',
-        unsafe_allow_html=True,
-    )
-    suppressions_n = max(int(aud_size * 0.045), 0) if aud_size else 0
-    final_send_n   = max(aud_size - suppressions_n, 0)
-    rev_disp = fmt_revenue(camp["revenue_est"]) if camp.get("revenue_est") else "—"
-    aud_disp  = f"{aud_size:,}"    if aud_size  else "—"
-    supp_disp = f"{suppressions_n:,}  (unsub + bounce + frequency cap)" if aud_size else "—"
-    final_disp = f"{final_send_n:,}" if aud_size else "—"
-    manifest_rows = [
-        ("Channel",          camp["channel"].upper()),
-        ("Send date",        camp["send_date"].strftime("%a, %b %d, %Y")),
-        ("Send window",      "10:00 AM ET — optimal per segment timing"),
-        ("Segment",          camp["segment"] if camp.get("segment") and camp["segment"] != "—" else "—"),
-        ("Audience size",    aud_disp),
-        ("Suppressed",       supp_disp),
-        ("Final recipients", final_disp),
-        ("Est. revenue",     rev_disp),
-        ("Owner",            camp["assigned_to"] if camp.get("assigned_to") and camp["assigned_to"] != "—" else "—"),
-    ]
-    rows_html = "".join(
-        f'<div style="display:flex;justify-content:space-between;gap:12px;'
-        f'padding:6px 0;border-bottom:1px solid {COLORS["border"]};font-size:0.75rem;">'
-        f'<span style="color:{COLORS["muted"]};">{k}</span>'
-        f'<span style="color:{COLORS["black"]};font-weight:600;text-align:right;">{v}</span>'
-        f'</div>'
-        for k, v in manifest_rows
-    )
-    st.markdown(
-        f'<div style="background:{COLORS["white"]};border:1px solid {COLORS["border"]};'
-        f'border-radius:8px;padding:12px 14px;">{rows_html}</div>',
-        unsafe_allow_html=True,
-    )
-
-    if not copy_from_gen:
+    with prev_col_r:
         st.markdown(
-            f'<div style="margin-top:12px;background:#FFF7E6;border:1px solid #F0C36D;'
-            f'border-radius:8px;padding:10px 12px;font-size:0.72rem;line-height:1.4;'
-            f'color:#7A5800;">'
-            f'<strong>Heads up:</strong> the copy shown above isn\'t from this session. '
-            f'Open Generation, produce copy for this campaign, and the QA panel below '
-            f'will re-evaluate.</div>',
+            f'<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:0.7rem;'
+            f'letter-spacing:0.08em;text-transform:uppercase;color:{COLORS["muted"]};'
+            f'margin-bottom:8px;">Send manifest</div>',
             unsafe_allow_html=True,
         )
+        suppressions_n = max(int(aud_size * 0.045), 0) if aud_size else 0
+        final_send_n   = max(aud_size - suppressions_n, 0)
+        rev_disp = fmt_revenue(camp["revenue_est"]) if camp.get("revenue_est") else "—"
+        aud_disp   = f"{aud_size:,}"    if aud_size  else "—"
+        supp_disp  = f"{suppressions_n:,}  (unsub + bounce + frequency cap)" if aud_size else "—"
+        final_disp = f"{final_send_n:,}" if aud_size else "—"
+        manifest_rows = [
+            ("Channel",          camp["channel"].upper()),
+            ("Send date",        camp["send_date"].strftime("%a, %b %d, %Y")),
+            ("Send window",      "10:00 AM ET — optimal per segment timing"),
+            ("Segment",          camp["segment"] if camp.get("segment") and camp["segment"] != "—" else "—"),
+            ("Audience size",    aud_disp),
+            ("Suppressed",       supp_disp),
+            ("Final recipients", final_disp),
+            ("Est. revenue",     rev_disp),
+            ("Owner",            camp["assigned_to"] if camp.get("assigned_to") and camp["assigned_to"] != "—" else "—"),
+        ]
+        rows_html = "".join(
+            f'<div style="display:flex;justify-content:space-between;gap:12px;'
+            f'padding:6px 0;border-bottom:1px solid {COLORS["border"]};font-size:0.75rem;">'
+            f'<span style="color:{COLORS["muted"]};">{k}</span>'
+            f'<span style="color:{COLORS["black"]};font-weight:600;text-align:right;">{v}</span>'
+            f'</div>'
+            for k, v in manifest_rows
+        )
+        st.markdown(
+            f'<div style="background:{COLORS["white"]};border:1px solid {COLORS["border"]};'
+            f'border-radius:8px;padding:12px 14px;">{rows_html}</div>',
+            unsafe_allow_html=True,
+        )
+
+        if not copy_from_gen:
+            st.markdown(
+                f'<div style="margin-top:12px;background:#FFF7E6;border:1px solid #F0C36D;'
+                f'border-radius:8px;padding:10px 12px;font-size:0.72rem;line-height:1.4;'
+                f'color:#7A5800;">'
+                f'<strong>Heads up:</strong> the copy shown above isn\'t from this session. '
+                f'Open Generation, produce copy for this campaign, and the QA panel below '
+                f'will re-evaluate.</div>',
+                unsafe_allow_html=True,
+            )
 
 st.divider()
 

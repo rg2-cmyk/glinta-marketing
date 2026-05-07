@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import streamlit as st
 import pandas as pd
 
-from shared.styles import COLORS, inject_css, top_nav, campaign_context_card
+from shared.styles import COLORS, inject_css, top_nav, phase_stepper, campaign_context_card
 from shared.data import load_data, fmt_revenue
 
 
@@ -43,20 +43,107 @@ def _image_frame(path: str, height_px: int = 340) -> str:
 inject_css()
 top_nav("Design")
 
+# Seed plan_added from sheet if Planning hasn't synced yet this session
+if st.session_state.get("_last_sheet_sync") is None:
+    try:
+        from shared.sheets import load_all_campaigns as _load_all
+        _p, _d = _load_all()
+        st.session_state["plan_added"]  = _p
+        st.session_state["plan_drafts"] = _d
+        st.session_state["_last_sheet_sync"] = date.today()
+    except Exception:
+        st.session_state.setdefault("plan_added", [])
+        st.session_state.setdefault("plan_drafts", [])
+
 st.markdown("<h1>Design</h1>", unsafe_allow_html=True)
 
+# ── Data connections ──────────────────────────────────────────────────────────
+_DESIGN_CONNECTIONS = [
+    {
+        "name":   "Figma",
+        "abbr":   "FG",
+        "color":  "#a259ff",
+        "status": "not connected",
+        "what":   "Push pinned references and brief directly into a Figma mood board",
+        "why":    "Gives the designer all context in one place — no copy-paste between tools",
+    },
+    {
+        "name":   "Air",
+        "abbr":   "AI",
+        "color":  "#000000",
+        "status": "not connected",
+        "what":   "Pull prior campaign imagery from the creative library",
+        "why":    "Replaces illustrative references with actual approved Glinta creative",
+    },
+    {
+        "name":   "Klaviyo",
+        "abbr":   "KL",
+        "color":  "#1a1a1a",
+        "status": "mock data",
+        "what":   "Historical send performance used to rank reference creative",
+        "why":    "Surfaces creative from campaigns that performed best for this category",
+    },
+    {
+        "name":   "Brand Guidelines",
+        "abbr":   "BG",
+        "color":  "#888",
+        "status": "tbd",
+        "what":   "Do/don't photography rules, approved asset lists, tone standards",
+        "why":    "Keeps brief constraints anchored to the latest Glinta brand standards",
+    },
+]
+_STATUS_STYLE = {
+    "mock data":     ("background:#f5f000;color:#000;",  "Mock data"),
+    "connected":     ("background:#caf30b;color:#000;",  "Connected"),
+    "not connected": ("background:#f2f2f2;color:#888;",  "Not connected"),
+    "tbd":           ("background:#e8c5ff;color:#000;",  "TBD"),
+}
+
 st.markdown(
-    f'<div style="background:{COLORS["yellow"]};border:1px solid {COLORS["black"]};'
-    f'border-radius:6px;padding:8px 14px;margin:0 0 14px;'
+    '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:11px;'
+    'font-weight:800;letter-spacing:0.12em;text-transform:uppercase;'
+    'color:#888;margin:4px 0 8px;">Data connections</div>',
+    unsafe_allow_html=True,
+)
+_conn_html = '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px;">'
+for _c in _DESIGN_CONNECTIONS:
+    _st_css, _st_lbl = _STATUS_STYLE.get(_c["status"], ("background:#eee;color:#666;", _c["status"]))
+    _conn_html += (
+        f'<div style="border:1.5px solid #e4e4e4;border-radius:8px;padding:12px 14px;background:#fff;">'
+        f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">'
+        f'<span style="background:{_c["color"]};color:#fff;border-radius:5px;'
+        f'width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;'
+        f'font-family:\'Barlow Condensed\',sans-serif;font-size:10px;font-weight:900;'
+        f'letter-spacing:0.04em;flex-shrink:0;">{_c["abbr"]}</span>'
+        f'<span style="font-family:\'Barlow Condensed\',sans-serif;font-size:13px;'
+        f'font-weight:800;letter-spacing:0.04em;color:#000;">{_c["name"]}</span>'
+        f'<span style="margin-left:auto;{_st_css}border-radius:4px;padding:1px 7px;'
+        f'font-size:9px;font-weight:700;white-space:nowrap;font-family:Barlow,sans-serif;'
+        f'letter-spacing:0.04em;text-transform:uppercase;">{_st_lbl}</span>'
+        f'</div>'
+        f'<div style="font-family:Barlow,sans-serif;font-size:11px;font-weight:600;'
+        f'color:#000;margin-bottom:3px;line-height:1.4;">{_c["what"]}</div>'
+        f'<div style="font-family:Barlow,sans-serif;font-size:10px;color:#888;line-height:1.4;">'
+        f'{_c["why"]}</div>'
+        f'</div>'
+    )
+_conn_html += '</div>'
+st.markdown(_conn_html, unsafe_allow_html=True)
+
+# ── Copilot note ──────────────────────────────────────────────────────────────
+st.markdown(
+    f'<div style="background:{COLORS["offwhite"]};border:1px solid {COLORS["border"]};'
+    f'border-radius:6px;padding:9px 14px;margin:0 0 20px;'
     f'display:flex;align-items:center;gap:10px;">'
-    f'<span style="font-family:\'Barlow Condensed\',sans-serif;font-size:0.65rem;'
+    f'<span style="font-family:\'Barlow Condensed\',sans-serif;font-size:0.6rem;'
     f'font-weight:800;letter-spacing:0.1em;text-transform:uppercase;'
-    f'background:{COLORS["black"]};color:{COLORS["white"]};'
-    f'padding:2px 8px;border-radius:3px;">Illustrative data</span>'
+    f'background:{COLORS["muted"]};color:{COLORS["white"]};'
+    f'padding:2px 8px;border-radius:3px;white-space:nowrap;">Copilot</span>'
     f'<span style="font-family:\'Barlow\',sans-serif;font-size:0.78rem;'
-    f'color:{COLORS["black"]};">'
-    f'Reference imagery and engagement numbers shown here are illustrative — '
-    f'final version will pull from prior Glinta campaign assets.</span>'
+    f'color:{COLORS["muted"]};line-height:1.4;">'
+    f'Designed to provide references for images and layouts — '
+    f'not a replacement for the design process itself. '
+    f'Use these recommendations to brief your designer in Figma.</span>'
     f'</div>',
     unsafe_allow_html=True,
 )
@@ -329,48 +416,34 @@ def _brief_field(label, value):
             f'</div>')
 
 
-st.markdown("<h2>Final brief</h2>", unsafe_allow_html=True)
-st.markdown(
-    f'<p style="font-family:\'Barlow\',sans-serif;font-size:0.78rem;'
-    f'color:{COLORS["muted"]};margin:-0.4rem 0 0.8rem;">'
-    f'Read-only summary of the approved brief from Generation. '
-    f'Edit in Generation → Design Brief.</p>',
-    unsafe_allow_html=True,
-)
-
 brief_status = camp.get("brief_status", "Approved")
 badge_bg = (COLORS["good"] if brief_status == "Approved"
             else COLORS["warn"] if brief_status in ("In Review", "Draft")
             else COLORS["muted"])
 
-st.markdown(
-    f'<div style="background:{COLORS["white"]};border:1.5px solid {COLORS["black"]};'
-    f'border-radius:10px;padding:18px 22px;margin-bottom:18px;">'
-    f'<div style="display:flex;justify-content:space-between;align-items:center;'
-    f'margin-bottom:14px;border-bottom:1px solid {COLORS["border"]};padding-bottom:10px;">'
-    f'<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:1rem;'
-    f'font-weight:800;letter-spacing:0.05em;text-transform:uppercase;">'
-    f'{camp["name"]} — Brief</div>'
-    f'<span style="background:{badge_bg};color:#fff;font-size:0.6rem;'
-    f'letter-spacing:0.07em;text-transform:uppercase;padding:3px 9px;'
-    f'border-radius:4px;font-weight:700;font-family:\'Barlow Condensed\',sans-serif;">'
-    f'Brief: {brief_status}</span>'
-    f'</div>'
-    f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:28px;">'
-    f'<div>'
-    f'{_brief_field("Objective", brief["objective"])}'
-    f'{_brief_field("Subject line (approved)", brief["subject"])}'
-    f'{_brief_field("Tone &amp; style direction", brief["tone"])}'
-    f'</div>'
-    f'<div>'
-    f'{_brief_field("Required assets", brief["assets"])}'
-    f'{_brief_field("Image references", brief["refs"])}'
-    f'{_brief_field("Notes for design", brief["notes"])}'
-    f'</div>'
-    f'</div>'
-    f'</div>',
-    unsafe_allow_html=True,
-)
+with st.expander(f"Final brief — {camp['name']}  ·  Brief: {brief_status}", expanded=False):
+    st.markdown(
+        f'<p style="font-family:\'Barlow\',sans-serif;font-size:0.78rem;'
+        f'color:{COLORS["muted"]};margin:0 0 12px;">'
+        f'Read-only summary of the approved brief from Generation. '
+        f'Edit in Generation → Design Brief.</p>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:28px;">'
+        f'<div>'
+        f'{_brief_field("Objective", brief["objective"])}'
+        f'{_brief_field("Subject line (approved)", brief["subject"])}'
+        f'{_brief_field("Tone &amp; style direction", brief["tone"])}'
+        f'</div>'
+        f'<div>'
+        f'{_brief_field("Required assets", brief["assets"])}'
+        f'{_brief_field("Image references", brief["refs"])}'
+        f'{_brief_field("Notes for design", brief["notes"])}'
+        f'</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -487,6 +560,21 @@ with tab_board:
         f'Real prior creative ranked for this <strong>{active_cat or "all"}</strong> campaign. '
         f'Each reference is anchored to its category\'s top-performing historical send '
         f'(open + click + conversion). In-category matches surface first.</p>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f'<div style="background:{COLORS["yellow"]};border:1px solid {COLORS["black"]};'
+        f'border-radius:6px;padding:7px 14px;margin:0 0 14px;'
+        f'display:flex;align-items:center;gap:10px;">'
+        f'<span style="font-family:\'Barlow Condensed\',sans-serif;font-size:0.6rem;'
+        f'font-weight:800;letter-spacing:0.1em;text-transform:uppercase;'
+        f'background:{COLORS["black"]};color:{COLORS["white"]};'
+        f'padding:2px 7px;border-radius:3px;white-space:nowrap;">Illustrative data</span>'
+        f'<span style="font-family:\'Barlow\',sans-serif;font-size:0.75rem;'
+        f'color:{COLORS["black"]};">'
+        f'Reference imagery and engagement numbers are illustrative — '
+        f'final version will pull from prior Glinta campaign assets.</span>'
+        f'</div>',
         unsafe_allow_html=True,
     )
 

@@ -78,9 +78,76 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
+# ── Data Connections Banner (Performance) ─────────────────────────────────────
+_PERF_CONNECTIONS = [
+    {
+        "name":   "Klaviyo",
+        "abbr":   "KL",
+        "color":  "#1a1a1a",
+        "status": "mock data",
+        "what":   "Historical campaign performance data",
+        "why":    "Drives all metrics shown — open, click, conversion, revenue, unsub, RPR across campaigns and flows",
+    },
+    {
+        "name":   "Klaviyo Events",
+        "abbr":   "KE",
+        "color":  "#555",
+        "status": "not connected",
+        "what":   "All customer events data (optional)",
+        "why":    "Enables deeper attribution — links individual open/click/purchase events to specific campaigns and segments",
+    },
+]
+_PERF_STATUS_STYLE = {
+    "mock data":     ("background:#f5f000;color:#000;", "Mock data"),
+    "connected":     ("background:#caf30b;color:#000;", "Connected"),
+    "not connected": ("background:#f2f2f2;color:#888;", "Not connected"),
+    "tbd":           ("background:#e8c5ff;color:#000;", "Connection Unknown"),
+}
+_perf_conn_html = (
+    '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:18px;">'
+)
+for _pc in _PERF_CONNECTIONS:
+    _pst_css, _pst_lbl = _PERF_STATUS_STYLE.get(_pc["status"], ("background:#eee;color:#666;", _pc["status"]))
+    _perf_conn_html += (
+        f'<div style="border:1.5px solid #e4e4e4;border-radius:8px;padding:12px 14px;background:#fff;">'
+        f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">'
+        f'<span style="background:{_pc["color"]};color:#fff;border-radius:5px;'
+        f'width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;'
+        f'font-family:\'Barlow Condensed\',sans-serif;font-size:10px;font-weight:900;'
+        f'letter-spacing:0.04em;flex-shrink:0;">{_pc["abbr"]}</span>'
+        f'<span style="font-family:\'Barlow Condensed\',sans-serif;font-size:13px;'
+        f'font-weight:800;letter-spacing:0.04em;color:#000;">{_pc["name"]}</span>'
+        f'<span style="margin-left:auto;{_pst_css}border-radius:4px;padding:1px 7px;'
+        f'font-size:9px;font-weight:700;white-space:nowrap;font-family:Barlow,sans-serif;'
+        f'letter-spacing:0.04em;text-transform:uppercase;">{_pst_lbl}</span>'
+        f'</div>'
+        f'<div style="font-family:Barlow,sans-serif;font-size:11px;font-weight:600;'
+        f'color:#000;margin-bottom:3px;line-height:1.4;">{_pc["what"]}</div>'
+        f'<div style="font-family:Barlow,sans-serif;font-size:10px;color:#888;line-height:1.4;">'
+        f'{_pc["why"]}</div>'
+        f'</div>'
+    )
+_perf_conn_html += '</div>'
+
 st.markdown("<h1>Performance</h1>", unsafe_allow_html=True)
+st.markdown(
+    "<p style=\"font-family:'Barlow',sans-serif;font-size:0.78rem;color:#888;"
+    "margin:-0.4rem 0 0.75rem;font-style:italic;line-height:1.5;\">"
+    "Prototype dashboard — not designed to replace current performance dashboards (Power BI etc.) "
+    "but to back suggestions during campaign planning. Open question during scoping phase.</p>",
+    unsafe_allow_html=True,
+)
 
 campaigns_df, flow_monthly, flow_msgs, benchmarks = load_data()
+
+# ── Data connection (shown above all tabs) ────────────────────────────────────
+st.markdown(
+    "<div style=\"font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;"
+    "letter-spacing:0.08em;text-transform:uppercase;"
+    "color:#888;margin:0 0 6px;\">Data connections</div>",
+    unsafe_allow_html=True,
+)
+st.markdown(_perf_conn_html, unsafe_allow_html=True)
 
 tab_camp, tab_flow, tab_ps, tab_channels = st.tabs(
     ["Campaigns", "Flows", "Products & Studios", "Channels"]
@@ -158,69 +225,10 @@ CAT_PALETTE = [
     "#C4956A","#E2B48A","#B87D6B","#D4A999",
 ]
 
-# ── Data Connections Banner (Performance) ─────────────────────────────────────
-_PERF_CONNECTIONS = [
-    {
-        "name":   "Klaviyo",
-        "abbr":   "KL",
-        "color":  "#1a1a1a",
-        "status": "mock data",
-        "what":   "Historical campaign performance data",
-        "why":    "Drives all metrics shown — open, click, conversion, revenue, unsub, RPR across campaigns and flows",
-    },
-    {
-        "name":   "Klaviyo Events",
-        "abbr":   "KE",
-        "color":  "#555",
-        "status": "not connected",
-        "what":   "All customer events data (optional)",
-        "why":    "Enables deeper attribution — links individual open/click/purchase events to specific campaigns and segments",
-    },
-]
-_PERF_STATUS_STYLE = {
-    "mock data":     ("background:#f5f000;color:#000;", "Mock data"),
-    "connected":     ("background:#caf30b;color:#000;", "Connected"),
-    "not connected": ("background:#f2f2f2;color:#888;", "Not connected"),
-    "tbd":           ("background:#e8c5ff;color:#000;", "Connection Unknown"),
-}
-_perf_conn_html = (
-    '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:18px;">'
-)
-for _pc in _PERF_CONNECTIONS:
-    _pst_css, _pst_lbl = _PERF_STATUS_STYLE.get(_pc["status"], ("background:#eee;color:#666;", _pc["status"]))
-    _perf_conn_html += (
-        f'<div style="border:1.5px solid #e4e4e4;border-radius:8px;padding:12px 14px;background:#fff;">'
-        f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">'
-        f'<span style="background:{_pc["color"]};color:#fff;border-radius:5px;'
-        f'width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;'
-        f'font-family:\'Barlow Condensed\',sans-serif;font-size:10px;font-weight:900;'
-        f'letter-spacing:0.04em;flex-shrink:0;">{_pc["abbr"]}</span>'
-        f'<span style="font-family:\'Barlow Condensed\',sans-serif;font-size:13px;'
-        f'font-weight:800;letter-spacing:0.04em;color:#000;">{_pc["name"]}</span>'
-        f'<span style="margin-left:auto;{_pst_css}border-radius:4px;padding:1px 7px;'
-        f'font-size:9px;font-weight:700;white-space:nowrap;font-family:Barlow,sans-serif;'
-        f'letter-spacing:0.04em;text-transform:uppercase;">{_pst_lbl}</span>'
-        f'</div>'
-        f'<div style="font-family:Barlow,sans-serif;font-size:11px;font-weight:600;'
-        f'color:#000;margin-bottom:3px;line-height:1.4;">{_pc["what"]}</div>'
-        f'<div style="font-family:Barlow,sans-serif;font-size:10px;color:#888;line-height:1.4;">'
-        f'{_pc["why"]}</div>'
-        f'</div>'
-    )
-_perf_conn_html += '</div>'
-
 # ══════════════════════════════════════════════════════════════════════════════
 # CAMPAIGNS TAB
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_camp:
-    st.markdown(
-        '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:11px;font-weight:700;'
-        'letter-spacing:0.08em;text-transform:uppercase;'
-        'color:#888;margin:4px 0 8px;">Data connections</div>',
-        unsafe_allow_html=True,
-    )
-    st.markdown(_perf_conn_html, unsafe_allow_html=True)
-
     df = campaigns_df.copy()
 
     # ── Filters ─────────────────────────────────────────────────────────────
@@ -1050,50 +1058,7 @@ with tab_flow:
     st.markdown(f_strip, unsafe_allow_html=True)
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    # ── Revenue over time ────────────────────────────────────────────────────
-    st.markdown("<h2>Flow Revenue Over Time</h2>", unsafe_allow_html=True)
-    rev_ts = (fm.groupby(fm["Month"].dt.to_period("M"))["Revenue"]
-              .sum().reset_index())
-    rev_ts["Month"] = rev_ts["Month"].dt.to_timestamp()
-    rev_ts = rev_ts.sort_values("Month")
-
-    fig_frev = go.Figure()
-    fig_frev.add_trace(go.Bar(x=rev_ts["Month"], y=rev_ts["Revenue"],
-                               marker_color=COLORS["lavender"], name="Revenue",
-                               marker_line_color=COLORS["black"], marker_line_width=1))
-    fig_frev.update_layout(**plot_theme(height=280),
-                            yaxis_tickprefix="$", xaxis_tickformat="%b %Y", bargap=0.3)
-    st.plotly_chart(fig_frev, use_container_width=True)
-
-    # ── Engagement rates over time ───────────────────────────────────────────
-    st.markdown("<h2>Flow Engagement Rates Over Time</h2>", unsafe_allow_html=True)
-    f_rate_cols = [c for c in ["Open Rate","Click Rate","Conversion Rate"]
-                   if c in fm.columns and not (c == "Open Rate" and sel_fch == "SMS")]
-    if f_rate_cols:
-        rates_ts = (fm.groupby(fm["Month"].dt.to_period("M"))[f_rate_cols]
-                    .mean().reset_index())
-        rates_ts["Month"] = rates_ts["Month"].dt.to_timestamp()
-        rates_ts = rates_ts.sort_values("Month")
-        fig_frates = go.Figure()
-        for col, color in zip(f_rate_cols, [COLORS["black"], COLORS["lavender"], COLORS["lime"]]):
-            fig_frates.add_trace(go.Scatter(x=rates_ts["Month"], y=rates_ts[col]*100,
-                                             mode="lines+markers", name=col.replace(" Rate",""),
-                                             line=dict(color=color, width=2), marker=dict(size=5)))
-        fig_frates.update_layout(**plot_theme(height=260),
-                                  yaxis_ticksuffix="%", xaxis_tickformat="%b %Y")
-        st.plotly_chart(fig_frates, use_container_width=True)
-
-    # ── Performance by Flow (expandable table) ───────────────────────────────
-    st.markdown("<hr>", unsafe_allow_html=True)
-    st.markdown("<h2>Performance by Flow</h2>", unsafe_allow_html=True)
-    st.markdown(
-        '<p style="font-family:\'Barlow\',sans-serif;font-size:0.78rem;color:#666;'
-        f'margin:-0.5rem 0 1rem;">Click any flow to see per-message performance. '
-        f'Top-level metrics summarize <b>{period_label}</b>; message rows are a 90-day snapshot.</p>',
-        unsafe_allow_html=True,
-    )
-
-    # ── Flow groupings (broader types) ───────────────────────────────────────
+    # ── Flow groupings (defined early — used by both chart and table) ───────────
     FLOW_GROUPS = {
         "Welcome":                       ["F001", "F002"],
         "Abandonment":                   ["F003", "F004", "F005", "F006", "F007"],
@@ -1107,6 +1072,93 @@ with tab_flow:
     flow_to_group   = {fid: g for g, fids in FLOW_GROUPS.items() for fid in fids}
     group_order_idx = {g: i for i, g in enumerate(FLOW_GROUPS)}
     fm["Group"] = fm["Flow ID"].map(flow_to_group).fillna("Other")
+
+    # Display labels — keep short for horizontal bar charts
+    _CAT_LABEL = {
+        "Welcome":                      "Welcome",
+        "Abandonment":                  "Abandonment",
+        "Post-purchase":                "Post-purchase",
+        "Appointments & Cancellations": "Appts & Cancellations",
+        "Winback":                      "Winback",
+        "Back in stock":                "Back in Stock",
+        "Birthday & Anniversary":       "Birthday & Anniv.",
+        "Other":                        "Other",
+    }
+
+    # ── Category-level weighted aggregation ──────────────────────────────────
+    _cat_agg = fm.groupby("Group", as_index=False).agg(
+        Delivered    = ("Delivered",         "sum"),
+        Clicks       = ("Unique Clicks",     "sum"),
+        Conversions  = ("Unique Conversions","sum"),
+        Revenue      = ("Revenue",           "sum"),
+        Recipients   = ("Recipients",        "sum"),
+    )
+    _cat_agg["Click Rate"] = _cat_agg["Clicks"]      / _cat_agg["Delivered"].replace(0, pd.NA)
+    _cat_agg["Conv Rate"]  = _cat_agg["Conversions"] / _cat_agg["Delivered"].replace(0, pd.NA)
+    _cat_agg["RPR"]        = _cat_agg["Revenue"]     / _cat_agg["Recipients"].replace(0, pd.NA)
+    _cat_agg["_g"]         = _cat_agg["Group"].map(group_order_idx).fillna(99)
+    _cat_agg = _cat_agg.sort_values("_g")
+    _cat_agg["Label"]      = _cat_agg["Group"].map(_CAT_LABEL).fillna(_cat_agg["Group"])
+
+    # ── Performance by Category charts ───────────────────────────────────────
+    st.markdown("<h2>Performance by Flow Category</h2>", unsafe_allow_html=True)
+
+    _cc1, _cc2, _cc3 = st.columns(3)
+    _bar_opts = dict(orientation="h", marker_color="#1a1a1a",
+                     marker_line_width=0, text=None)
+
+    def _hbar(col, vals, labels, title, fmt_fn, tick_fmt, theme_overrides=None):
+        fig = go.Figure(go.Bar(
+            y=labels, x=vals,
+            orientation="h",
+            marker_color="#1a1a1a",
+            marker_line_width=0,
+            customdata=[[fmt_fn(v)] for v in vals],
+            hovertemplate="%{y}<br>" + title + ": %{customdata[0]}<extra></extra>",
+        ))
+        overrides = dict(
+            margin=dict(t=32, b=10, l=0, r=10),
+            height=260,
+            xaxis=dict(tickformat=tick_fmt, showgrid=True,
+                       gridcolor=COLORS["border"], zeroline=False,
+                       tickfont=dict(size=9)),
+            yaxis=dict(showgrid=False, tickfont=dict(size=10), autorange="reversed"),
+            title=dict(text=f"<b>{title}</b>", font_size=11, x=0),
+            bargap=0.35,
+            showlegend=False,
+        )
+        if theme_overrides:
+            overrides.update(theme_overrides)
+        fig.update_layout(**plot_theme(**overrides))
+        return fig
+
+    _labels = _cat_agg["Label"].tolist()
+
+    _cc1.plotly_chart(
+        _hbar("click", _cat_agg["Click Rate"].fillna(0).tolist(), _labels,
+              "Click Rate", lambda v: f"{v*100:.2f}%", ".2%"),
+        use_container_width=True,
+    )
+    _cc2.plotly_chart(
+        _hbar("conv", _cat_agg["Conv Rate"].fillna(0).tolist(), _labels,
+              "Conv. Rate", lambda v: f"{v*100:.2f}%", ".2%"),
+        use_container_width=True,
+    )
+    _cc3.plotly_chart(
+        _hbar("rpr", _cat_agg["RPR"].fillna(0).tolist(), _labels,
+              "RPR", lambda v: f"${v:.2f}", "$,.2f"),
+        use_container_width=True,
+    )
+
+    # ── Performance by Flow (expandable table) ───────────────────────────────
+    st.markdown("<hr>", unsafe_allow_html=True)
+    st.markdown("<h2>Performance by Flow</h2>", unsafe_allow_html=True)
+    st.markdown(
+        '<p style="font-family:\'Barlow\',sans-serif;font-size:0.78rem;color:#666;'
+        f'margin:-0.5rem 0 1rem;">Click any flow to see per-message performance. '
+        f'Top-level metrics summarize <b>{period_label}</b>; message rows are a 90-day snapshot.</p>',
+        unsafe_allow_html=True,
+    )
 
     flow_perf = (
         fm.groupby(["Flow ID","Flow Name","Trigger Type","# Messages","Channel"], as_index=False)

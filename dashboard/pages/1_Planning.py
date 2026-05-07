@@ -238,6 +238,37 @@ for _c in _CONNECTIONS:
     )
 _conn_html += '</div>'
 
+# ── Connector strip for Upcoming & Draft Campaigns (Asana + Shopify only) ────
+_UPCOMING_CONNECTORS = [c for c in _CONNECTIONS if c["name"] in ("Asana", "Shopify")]
+_upcoming_conn_html = (
+    '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;'
+    'margin-bottom:18px;">'
+)
+for _c in _UPCOMING_CONNECTORS:
+    _st_css, _st_lbl = _STATUS_STYLE.get(_c["status"], ("background:#eee;color:#666;", _c["status"]))
+    _upcoming_conn_html += (
+        f'<div style="border:1.5px solid #e4e4e4;border-radius:8px;padding:12px 14px;'
+        f'background:#fff;position:relative;">'
+        f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">'
+        f'<span style="background:{_c["color"]};color:#fff;border-radius:5px;'
+        f'width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;'
+        f'font-family:\'Barlow Condensed\',sans-serif;font-size:10px;font-weight:900;'
+        f'letter-spacing:0.04em;flex-shrink:0;">{_c["abbr"]}</span>'
+        f'<span style="font-family:\'Barlow Condensed\',sans-serif;font-size:13px;'
+        f'font-weight:800;letter-spacing:0.04em;color:#000;">{_c["name"]}</span>'
+        f'<span style="margin-left:auto;{_st_css}border-radius:4px;padding:1px 7px;'
+        f'font-size:9px;font-weight:700;white-space:nowrap;font-family:Barlow,sans-serif;'
+        f'letter-spacing:0.04em;text-transform:uppercase;">{_st_lbl}</span>'
+        f'</div>'
+        f'<div style="font-family:Barlow,sans-serif;font-size:11px;font-weight:600;'
+        f'color:#000;margin-bottom:3px;line-height:1.4;">{_c["what"]}</div>'
+        f'<div style="font-family:Barlow,sans-serif;font-size:10px;color:#888;line-height:1.4;">'
+        f'{_c["why"]}</div>'
+        f'</div>'
+    )
+_upcoming_conn_html += '</div>'
+
+
 # Pre-compute audience set (used in both Calendar filters and New Campaign form)
 all_auds_set: set = set()
 if "Audiences" in cal_df.columns:
@@ -245,6 +276,37 @@ if "Audiences" in cal_df.columns:
         for _a in str(_v).split(","):
             _a = _a.strip()
             if _a: all_auds_set.add(_a)
+
+
+def _do_sheet_sync(show_toast=False):
+    """Pull latest from sheet → update session state. Returns True on success."""
+    _planned, _drafts, _err = _fetch_sheet_campaigns()
+    if _err:
+        st.session_state["_sheet_sync_error"] = _err
+        return False
+    if _planned is None:
+        return False  # sheets not configured
+    st.session_state["plan_added"]  = _planned
+    st.session_state["plan_drafts"] = _drafts
+    st.session_state["_last_sheet_sync"] = date.today()
+    st.session_state["_sheet_sync_error"] = None
+    for _sc in _planned + _drafts:
+        _did = _sc.get("id")
+        if _did and "decisioning" in _sc:
+            if "decisioning_state" not in st.session_state:
+                st.session_state["decisioning_state"] = {}
+            if _did not in st.session_state["decisioning_state"]:
+                st.session_state["decisioning_state"][_did] = _sc["decisioning"]
+    if show_toast:
+        st.toast("Synced from Google Sheets ✓", icon="🔄")
+    return True
+
+
+# Auto-sync from sheet on first page load (regardless of which tab is active)
+if st.session_state.get("_last_sheet_sync") is None:
+    if _do_sheet_sync():
+        st.rerun()
+
 
 tab_cal, tab_upcoming, tab_plan = st.tabs([
     "Calendar", "Upcoming & Draft Campaigns", "Plan a Campaign"
@@ -535,6 +597,15 @@ def _launch_chip(row, d):
 # CALENDAR TAB
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_cal:
+    # ── Data connections banner ───────────────────────────────────────────────
+    st.markdown(
+        '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:11px;'
+        'font-weight:800;letter-spacing:0.12em;text-transform:uppercase;'
+        'color:#888;margin:0 0 8px;">Data connections</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(_conn_html, unsafe_allow_html=True)
+
     cal_sub_timeline, cal_sub_month = st.tabs(["Timeline", "Month"])
 
     # ── Month View ─────────────────────────────────────────────────────────────
@@ -1302,10 +1373,17 @@ function _bindCrChips() {
 }
 _bindCrChips();
 document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeModal(); });
-window.addEventListener('load', function() {
+function _scrollToToday() {
   var el = document.querySelector('.wk-hdr.now');
-  if (el) { document.documentElement.scrollLeft = el.offsetLeft - 80; }
-});
+  if (!el) return;
+  var x = Math.max(0, el.offsetLeft - 20);
+  document.documentElement.scrollLeft = x;
+  document.body.scrollLeft = x;
+}
+// Attempt immediately, then retry to handle layout settling
+_scrollToToday();
+setTimeout(_scrollToToday, 100);
+setTimeout(_scrollToToday, 400);
 </script>
 """
         # Serialise the chip registry as a plain JS variable — no HTML encoding needed
@@ -1740,15 +1818,6 @@ window.addEventListener('load', function() {
     rv5.markdown(_card("Top Category Opportunities",     opp_body),     unsafe_allow_html=True)
     rv6.markdown(_card("Product & Studio Opportunities", prod_opp_body),unsafe_allow_html=True)
 
-    # ── Data connections ────────────────────────────────────────────────────
-    st.markdown(
-        '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:11px;'
-        'font-weight:800;letter-spacing:0.12em;text-transform:uppercase;'
-        'color:#888;margin:24px 0 8px;">Data connections</div>',
-        unsafe_allow_html=True,
-    )
-    st.markdown(_conn_html, unsafe_allow_html=True)
-
     # ── Calendar Discussion ──────────────────────────────────────────────────
     # Session state for reply targeting
     if "_cm_reply_to_id"     not in st.session_state: st.session_state["_cm_reply_to_id"]     = ""
@@ -1955,39 +2024,17 @@ window.addEventListener('load', function() {
 with tab_upcoming:
     st.markdown("<h2>Upcoming & Draft Campaigns</h2>", unsafe_allow_html=True)
 
+    st.markdown(
+        '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:11px;'
+        'font-weight:800;letter-spacing:0.12em;text-transform:uppercase;'
+        'color:#888;margin:4px 0 8px;">Data connections</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(_upcoming_conn_html, unsafe_allow_html=True)
+
     _GOAL_OPTIONS    = ["Awareness", "Conversion", "Flash Sale", "Launch",
                         "Re-engagement", "Retention"]
     _CHANNEL_OPTIONS = ["email", "sms"]
-
-    # ── Sheet sync helper ─────────────────────────────────────────────────────
-    def _do_sheet_sync(show_toast=False):
-        """Pull latest from sheet → update session state. Returns True on success."""
-        _planned, _drafts, _err = _fetch_sheet_campaigns()
-        if _err:
-            st.session_state["_sheet_sync_error"] = _err
-            return False
-        if _planned is None:
-            return False  # sheets not configured
-        st.session_state["plan_added"]  = _planned
-        st.session_state["plan_drafts"] = _drafts
-        st.session_state["_last_sheet_sync"] = date.today()
-        st.session_state["_sheet_sync_error"] = None
-        # Restore decisioning state for newly loaded campaigns
-        for _sc in _planned + _drafts:
-            _did = _sc.get("id")
-            if _did and "decisioning" in _sc:
-                if "decisioning_state" not in st.session_state:
-                    st.session_state["decisioning_state"] = {}
-                if _did not in st.session_state["decisioning_state"]:
-                    st.session_state["decisioning_state"][_did] = _sc["decisioning"]
-        if show_toast:
-            st.toast("Synced from Google Sheets ✓", icon="🔄")
-        return True
-
-    # Auto-sync on first render of this tab, then rerun so data is visible
-    if st.session_state.get("_last_sheet_sync") is None:
-        if _do_sheet_sync():
-            st.rerun()
 
     # ── Sync status bar ───────────────────────────────────────────────────────
     _sync_err = st.session_state.get("_sheet_sync_error")

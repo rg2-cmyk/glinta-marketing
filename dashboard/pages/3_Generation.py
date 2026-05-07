@@ -23,6 +23,18 @@ CURRENT_USER = "Riddhima Goel"
 inject_css()
 top_nav("Content Generation")
 
+# Seed plan_added from sheet if Planning hasn't synced yet this session
+if st.session_state.get("_last_sheet_sync") is None:
+    try:
+        from shared.sheets import load_all_campaigns as _load_all
+        _p, _d = _load_all()
+        st.session_state["plan_added"]  = _p
+        st.session_state["plan_drafts"] = _d
+        st.session_state["_last_sheet_sync"] = date.today()
+    except Exception:
+        st.session_state.setdefault("plan_added", [])
+        st.session_state.setdefault("plan_drafts", [])
+
 st.markdown("<h1>Generation</h1>", unsafe_allow_html=True)
 
 # ── Data connections banner ───────────────────────────────────────────────────
@@ -32,35 +44,79 @@ st.markdown(
     'color:#888;margin:4px 0 8px;">Data connections</div>',
     unsafe_allow_html=True,
 )
-_gen_conn_col, _ = st.columns([2, 4])
-with _gen_conn_col:
-    st.markdown(
+
+_GEN_STATUS_STYLE = {
+    "mock data":     ("background:#f5f000;color:#000;",  "Mock data"),
+    "connected":     ("background:#caf30b;color:#000;",  "Connected"),
+    "not connected": ("background:#f2f2f2;color:#888;",  "Not connected"),
+    "tbd":           ("background:#e8c5ff;color:#000;",  "Connection Unknown"),
+}
+
+_GEN_CONNECTIONS = [
+    {
+        "abbr":   "GD",
+        "color":  "#1a73e8",
+        "name":   "Drive",
+        "status": "not connected",
+        "what":   "All finalized copy and briefs saved to Drive for commenting and editing",
+        "why":    "Team can approve via Copilot or Drive — edits sync back automatically",
+    },
+    {
+        "abbr":   "Air",
+        "color":  "#1C1C1E",
+        "name":   "Air / Dropbox",
+        "status": "not connected",
+        "what":   "Reference and pull campaign assets; share direct links with the design team",
+        "why":    "Design brief includes asset links from your creative library — no extra steps",
+    },
+    {
+        "abbr":   "AS",
+        "color":  "#F06A6A",
+        "name":   "Asana",
+        "status": "not connected",
+        "what":   "Push design brief tasks to Asana; assign owners and set due dates",
+        "why":    "Brief flows directly into project management — no copy-paste handoff",
+    },
+    {
+        "abbr":   "BL",
+        "color":  "#5B4FCF",
+        "name":   "Brand & Legal",
+        "status": "not connected",
+        "what":   "Brand voice, tone guidelines, and legal copy rules used to ground all AI generation",
+        "why":    "Copy stays on-brand and legally compliant without manual review every draft",
+    },
+]
+
+_gen_conn_html = (
+    '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;'
+    'margin-bottom:14px;">'
+)
+for _gc in _GEN_CONNECTIONS:
+    _gst_css, _gst_lbl = _GEN_STATUS_STYLE.get(
+        _gc["status"], ("background:#eee;color:#666;", _gc["status"])
+    )
+    _gen_conn_html += (
         f'<div style="border:1.5px solid #e4e4e4;border-radius:8px;padding:12px 14px;'
         f'background:#fff;">'
-        # Top row: logo + name + status
         f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">'
-        f'<span style="background:#1a73e8;color:#fff;border-radius:5px;'
+        f'<span style="background:{_gc["color"]};color:#fff;border-radius:5px;'
         f'width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;'
         f'font-family:\'Barlow Condensed\',sans-serif;font-size:10px;font-weight:900;'
-        f'letter-spacing:0.04em;flex-shrink:0;">GD</span>'
+        f'letter-spacing:0.04em;flex-shrink:0;">{_gc["abbr"]}</span>'
         f'<span style="font-family:\'Barlow Condensed\',sans-serif;font-size:13px;'
-        f'font-weight:800;letter-spacing:0.04em;color:#000;">Drive</span>'
-        f'<span style="margin-left:auto;background:#f2f2f2;color:#888;border-radius:4px;'
-        f'padding:1px 7px;font-size:9px;font-weight:700;white-space:nowrap;'
-        f'font-family:Barlow,sans-serif;letter-spacing:0.04em;'
-        f'text-transform:uppercase;">Not connected</span>'
+        f'font-weight:800;letter-spacing:0.04em;color:#000;">{_gc["name"]}</span>'
+        f'<span style="margin-left:auto;{_gst_css}border-radius:4px;padding:1px 7px;'
+        f'font-size:9px;font-weight:700;white-space:nowrap;font-family:Barlow,sans-serif;'
+        f'letter-spacing:0.04em;text-transform:uppercase;">{_gst_lbl}</span>'
         f'</div>'
-        # What
         f'<div style="font-family:Barlow,sans-serif;font-size:11px;font-weight:600;'
-        f'color:#000;margin-bottom:3px;line-height:1.4;">All finalized copy and briefs '
-        f'saved to Drive for commenting and editing — automatically synced back into '
-        f'copy in Copilot</div>'
-        # Why
+        f'color:#000;margin-bottom:3px;line-height:1.4;">{_gc["what"]}</div>'
         f'<div style="font-family:Barlow,sans-serif;font-size:10px;color:#888;line-height:1.4;">'
-        f'Approval can be done via the current flow here or in Copilot based on team needs</div>'
-        f'</div>',
-        unsafe_allow_html=True,
+        f'{_gc["why"]}</div>'
+        f'</div>'
     )
+_gen_conn_html += '</div>'
+st.markdown(_gen_conn_html, unsafe_allow_html=True)
 
 st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
@@ -173,20 +229,81 @@ camp_labels = [_camp_label(c) for c in all_campaigns]
 active_id = st.session_state.get("active_campaign_id", all_campaigns[0]["id"])
 active_idx = next((i for i, c in enumerate(all_campaigns) if c["id"] == active_id), 0)
 
-sel_col, _ = st.columns([3, 3])
-with sel_col:
-    chosen_label = st.selectbox(
-        "Editing campaign",
-        camp_labels,
-        index=active_idx,
-        key="gen_camp",
-        help="Pulls from Planning → Upcoming Campaigns: scheduled sends from your "
-             "campaign data plus anything you added in Plan a Campaign.",
-    )
-camp = all_campaigns[camp_labels.index(chosen_label)]
-st.session_state["active_campaign_id"] = camp["id"]
+# ── Per-campaign color constants (used in tab_brief expanders) ───────────────
+_AIR_COLOR   = "#1C1C1E"   # Air brand near-black
+_DBX_COLOR   = "#0061FF"   # Dropbox blue
+_ASANA_COLOR = "#F06A6A"   # Asana coral
 
-campaign_context_card(camp)
+
+def _mock_assets_for_campaign(camp):
+    """Generate context-aware mock asset entries for the campaign."""
+    name = camp.get("name", "")
+    prod = camp.get("product", "")
+    cat  = camp.get("category", "")
+
+    assets = []
+    if "Mother" in name or "Mom" in name:
+        assets = [
+            {"name": "Mothers_Day_Hero_Stack.jpg",       "type": "Hero",         "fmt": "JPEG"},
+            {"name": "Gold_Studs_Product_Tile_01.jpg",   "type": "Product tile", "fmt": "JPEG"},
+            {"name": "Pearl_Huggie_Product_Tile_02.jpg", "type": "Product tile", "fmt": "JPEG"},
+            {"name": "Lifestyle_BTS_Hand_01.jpg",        "type": "Lifestyle",    "fmt": "JPEG"},
+        ]
+    elif "Opal" in name or "Opal" in prod:
+        assets = [
+            {"name": "Opal_Collection_Hero.jpg",         "type": "Hero",         "fmt": "JPEG"},
+            {"name": "Opal_Cluster_Stud_Detail.jpg",     "type": "Product tile", "fmt": "JPEG"},
+            {"name": "Opal_Stack_Lifestyle.jpg",         "type": "Lifestyle",    "fmt": "JPEG"},
+            {"name": "Opal_Campaign_Lockup.png",         "type": "Graphic",      "fmt": "PNG"},
+        ]
+    elif "VIP" in name or "VIP" in cat:
+        assets = [
+            {"name": "VIP_Early_Access_Hero.jpg",        "type": "Hero",         "fmt": "JPEG"},
+            {"name": "Summer_Drop_Product_Flat.jpg",     "type": "Product tile", "fmt": "JPEG"},
+            {"name": "VIP_Email_Header_Banner.png",      "type": "Banner",       "fmt": "PNG"},
+            {"name": "Studio_Interior_BTS.jpg",          "type": "Lifestyle",    "fmt": "JPEG"},
+        ]
+    elif "Studio" in name or "Studio" in cat:
+        assets = [
+            {"name": "Studio_Opening_Hero.jpg",          "type": "Hero",         "fmt": "JPEG"},
+            {"name": "Studio_Interior_Wide.jpg",         "type": "Lifestyle",    "fmt": "JPEG"},
+            {"name": "Williamsburg_Exterior.jpg",        "type": "Lifestyle",    "fmt": "JPEG"},
+            {"name": "Studio_Product_Display.jpg",       "type": "Product tile", "fmt": "JPEG"},
+        ]
+    elif "Diamond" in name or "Diamond" in prod or "Flatback" in name:
+        assets = [
+            {"name": "Diamond_Flatback_Hero.jpg",        "type": "Hero",         "fmt": "JPEG"},
+            {"name": "Diamond_Cluster_Detail.jpg",       "type": "Product tile", "fmt": "JPEG"},
+            {"name": "Flatback_Stack_Ear_Flat.jpg",      "type": "Lifestyle",    "fmt": "JPEG"},
+        ]
+    elif "Flash" in name or "Sale" in cat or "Promo" in cat:
+        assets = [
+            {"name": "Flash_Sale_Hero_Banner.jpg",       "type": "Hero",         "fmt": "JPEG"},
+            {"name": "Hoops_Product_Tile_01.jpg",        "type": "Product tile", "fmt": "JPEG"},
+            {"name": "Flash_Sale_Countdown_Badge.png",   "type": "Graphic",      "fmt": "PNG"},
+        ]
+    elif "Grad" in name or "Gift" in name:
+        assets = [
+            {"name": "Gift_Guide_Hero.jpg",              "type": "Hero",         "fmt": "JPEG"},
+            {"name": "Gift_Stack_Flat.jpg",              "type": "Product tile", "fmt": "JPEG"},
+            {"name": "Grad_Lifestyle_Hands.jpg",         "type": "Lifestyle",    "fmt": "JPEG"},
+            {"name": "Gift_Box_Packaging.jpg",           "type": "Packaging",    "fmt": "JPEG"},
+        ]
+    else:
+        assets = [
+            {"name": f"{name.replace(' ','_')[:24]}_Hero.jpg",    "type": "Hero",         "fmt": "JPEG"},
+            {"name": "Product_Tile_Primary.jpg",                   "type": "Product tile", "fmt": "JPEG"},
+            {"name": "Lifestyle_Stack_Shot.jpg",                   "type": "Lifestyle",    "fmt": "JPEG"},
+        ]
+
+    air_base = "https://app.air.inc/a/glinta-creative/2026/may"
+    dbx_base = "https://www.dropbox.com/sh/glinta-assets/may2026"
+    for a in assets:
+        slug = a["name"].replace(".jpg", "").replace(".png", "").lower()
+        a["air_url"] = f"{air_base}/{slug}"
+        a["dbx_url"] = f"{dbx_base}/{slug}"
+    return assets
+
 
 tab_review, tab_copy, tab_brief = st.tabs(["Campaign Review", "Copy Generation", "Design Brief"])
 
@@ -1019,6 +1136,24 @@ with tab_review:
 # COPY GENERATION TAB
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_copy:
+    # ── Campaign selector ─────────────────────────────────────────────────────
+    _copy_active_id  = st.session_state.get("active_campaign_id", all_campaigns[0]["id"])
+    _copy_active_idx = next((i for i, c in enumerate(all_campaigns)
+                             if c["id"] == _copy_active_id), 0)
+    _copy_sel_col, _ = st.columns([3, 3])
+    with _copy_sel_col:
+        _copy_chosen = st.selectbox(
+            "Editing campaign",
+            camp_labels,
+            index=_copy_active_idx,
+            key="gen_camp_copy",
+            help="Pulls from Planning → Upcoming Campaigns: scheduled sends from your "
+                 "campaign data plus anything you added in Plan a Campaign.",
+        )
+    camp = all_campaigns[camp_labels.index(_copy_chosen)]
+    st.session_state["active_campaign_id"] = camp["id"]
+    campaign_context_card(camp)
+
     st.markdown("<h2>Copy Generation</h2>", unsafe_allow_html=True)
     st.markdown(
         '<p style="font-family:\'Barlow\',sans-serif;font-size:0.82rem;color:#666;'
@@ -1734,20 +1869,159 @@ with tab_copy:
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_brief:
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # DATA CONNECTIONS
-    # ══════════════════════════════════════════════════════════════════════════
-    st.markdown(
-        '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:0.65rem;'
-        'letter-spacing:0.12em;text-transform:uppercase;color:#888;margin-bottom:8px;">'
-        'Data connections</div>',
-        unsafe_allow_html=True,
-    )
+    # ── Campaign selector ─────────────────────────────────────────────────────
+    _brief_active_id  = st.session_state.get("active_campaign_id", all_campaigns[0]["id"])
+    _brief_active_idx = next((i for i, c in enumerate(all_campaigns)
+                              if c["id"] == _brief_active_id), 0)
+    _brief_sel_col, _ = st.columns([3, 3])
+    with _brief_sel_col:
+        _brief_chosen = st.selectbox(
+            "Editing campaign",
+            camp_labels,
+            index=_brief_active_idx,
+            key="gen_camp_brief",
+            help="Pulls from Planning → Upcoming Campaigns: scheduled sends from your "
+                 "campaign data plus anything you added in Plan a Campaign.",
+        )
+    camp = all_campaigns[camp_labels.index(_brief_chosen)]
+    st.session_state["active_campaign_id"] = camp["id"]
+    campaign_context_card(camp)
 
-    # ── Asana card ────────────────────────────────────────────────────────────
-    # Asana brand coral
-    _ASANA_COLOR = "#F06A6A"
+    # ── Air / Dropbox ─────────────────────────────────────────────────────────
+    _assets = _mock_assets_for_campaign(camp)
+    _air_folder_key = f"air_folder_{camp['id']}"
+    _dbx_folder_key = f"dbx_folder_{camp['id']}"
 
+    with st.expander("**Air / Dropbox** — reference assets & links for this campaign",
+                     expanded=False):
+        st.markdown(
+            f'<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">'
+            f'<div style="display:flex;align-items:center;gap:6px;">'
+            f'<div style="width:22px;height:22px;border-radius:5px;background:{_AIR_COLOR};'
+            f'display:flex;align-items:center;justify-content:center;">'
+            f'<span style="color:#fff;font-size:0.55rem;font-weight:900;'
+            f'font-family:\'Barlow Condensed\',sans-serif;letter-spacing:0.05em;">AIR</span>'
+            f'</div>'
+            f'<span style="font-family:\'Barlow Condensed\',sans-serif;font-size:0.9rem;'
+            f'font-weight:800;letter-spacing:0.04em;text-transform:uppercase;">Air</span>'
+            f'</div>'
+            f'<span style="color:{COLORS["muted"]};font-size:0.8rem;">+</span>'
+            f'<div style="display:flex;align-items:center;gap:6px;">'
+            f'<div style="width:22px;height:22px;border-radius:50%;background:{_DBX_COLOR};'
+            f'display:flex;align-items:center;justify-content:center;">'
+            f'<span style="color:#fff;font-size:0.5rem;font-weight:900;">◆</span>'
+            f'</div>'
+            f'<span style="font-family:\'Barlow Condensed\',sans-serif;font-size:0.9rem;'
+            f'font-weight:800;letter-spacing:0.04em;text-transform:uppercase;">Dropbox</span>'
+            f'</div>'
+            f'<span style="font-size:0.65rem;color:{COLORS["muted"]};margin-left:4px;">'
+            f'Campaign asset references — include links in the brief for the design team</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        _fl1, _fl2 = st.columns(2)
+        with _fl1:
+            _air_folder = st.text_input(
+                "Air folder URL",
+                value=st.session_state.get(_air_folder_key,
+                    "https://app.air.inc/a/glinta-creative/2026/may"),
+                key=_air_folder_key,
+                placeholder="https://app.air.inc/…",
+            )
+        with _fl2:
+            _dbx_folder = st.text_input(
+                "Dropbox folder URL",
+                value=st.session_state.get(_dbx_folder_key,
+                    "https://www.dropbox.com/sh/glinta-assets/may2026"),
+                key=_dbx_folder_key,
+                placeholder="https://www.dropbox.com/sh/…",
+            )
+        st.markdown(
+            f'<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:0.65rem;'
+            f'letter-spacing:0.1em;text-transform:uppercase;color:#888;'
+            f'margin:10px 0 8px;">Assets for this campaign</div>',
+            unsafe_allow_html=True,
+        )
+        _type_colors = {
+            "Hero": "#1C1C1E", "Product tile": "#444", "Lifestyle": "#5B4FCF",
+            "Graphic": "#0061FF", "Banner": "#C47F00", "Packaging": "#2E7D32",
+        }
+        _asset_pairs = [_assets[i:i+2] for i in range(0, len(_assets), 2)]
+        for pair in _asset_pairs:
+            _pair_cols = st.columns(2)
+            for _col, asset in zip(_pair_cols, pair):
+                _incl_key = f"asset_incl_{camp['id']}_{asset['name']}"
+                _included = st.session_state.get(_incl_key, True)
+                _tc = _type_colors.get(asset["type"], "#555")
+                _bg = COLORS["offwhite"] if _included else COLORS["white"]
+                _border = COLORS["black"] if _included else COLORS["border"]
+                with _col:
+                    st.markdown(
+                        f'<div style="background:{_bg};border:1.5px solid {_border};'
+                        f'border-radius:8px;padding:9px 11px;margin-bottom:8px;">'
+                        f'<div style="display:flex;justify-content:space-between;'
+                        f'align-items:flex-start;gap:6px;margin-bottom:6px;">'
+                        f'<div style="font-size:0.76rem;font-weight:600;flex:1;'
+                        f'line-height:1.2;word-break:break-all;">{asset["name"]}</div>'
+                        f'<span style="background:{_tc};color:#fff;padding:1px 6px;'
+                        f'border-radius:50px;font-size:0.55rem;font-weight:700;'
+                        f'white-space:nowrap;font-family:\'Barlow Condensed\',sans-serif;">'
+                        f'{asset["type"].upper()}</span>'
+                        f'</div>'
+                        f'<div style="display:flex;gap:8px;flex-wrap:wrap;">'
+                        f'<a href="{asset["air_url"]}" target="_blank" '
+                        f'style="font-size:0.62rem;font-weight:700;color:{_AIR_COLOR};'
+                        f'background:#f0f0f0;border-radius:4px;padding:2px 7px;'
+                        f'text-decoration:none;font-family:\'Barlow Condensed\',sans-serif;'
+                        f'letter-spacing:0.04em;text-transform:uppercase;">Air →</a>'
+                        f'<a href="{asset["dbx_url"]}" target="_blank" '
+                        f'style="font-size:0.62rem;font-weight:700;color:{_DBX_COLOR};'
+                        f'background:#e8f0ff;border-radius:4px;padding:2px 7px;'
+                        f'text-decoration:none;font-family:\'Barlow Condensed\',sans-serif;'
+                        f'letter-spacing:0.04em;text-transform:uppercase;">Dropbox →</a>'
+                        f'</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+                    _new_incl = st.checkbox(
+                        "Include in brief",
+                        value=_included,
+                        key=f"asset_cb_{camp['id']}_{asset['name']}",
+                    )
+                    if _new_incl != _included:
+                        st.session_state[_incl_key] = _new_incl
+                        st.rerun()
+        _included_assets = [
+            a for a in _assets
+            if st.session_state.get(f"asset_incl_{camp['id']}_{a['name']}", True)
+        ]
+        if _included_assets:
+            st.markdown(
+                f'<div style="background:{COLORS["offwhite"]};border-left:3px solid '
+                f'{COLORS["black"]};border-radius:0 6px 6px 0;padding:9px 12px;'
+                f'margin-top:6px;">'
+                f'<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:0.62rem;'
+                f'letter-spacing:0.09em;text-transform:uppercase;color:#888;margin-bottom:5px;">'
+                f'Included in brief ({len(_included_assets)} asset{"s" if len(_included_assets)!=1 else ""})'
+                f'</div>'
+                + "".join(
+                    f'<div style="font-size:0.72rem;padding:2px 0;">'
+                    f'<span style="font-weight:600;">{a["name"]}</span>'
+                    f' &nbsp;<span style="color:{COLORS["muted"]};">{a["type"]}</span>'
+                    f' &nbsp;<a href="{a["air_url"]}" target="_blank" '
+                    f'style="color:{_AIR_COLOR};font-size:0.65rem;text-decoration:none;'
+                    f'font-weight:700;">Air</a>'
+                    f' · <a href="{a["dbx_url"]}" target="_blank" '
+                    f'style="color:{_DBX_COLOR};font-size:0.65rem;text-decoration:none;'
+                    f'font-weight:700;">Dropbox</a>'
+                    f'</div>'
+                    for a in _included_assets
+                )
+                + f'</div>',
+                unsafe_allow_html=True,
+            )
+
+    # ── Asana ─────────────────────────────────────────────────────────────────
     with st.expander("**Asana** — push brief & assign task owners", expanded=False):
         st.markdown(
             f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">'
@@ -1759,15 +2033,13 @@ with tab_brief:
             f'<div>'
             f'<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:0.9rem;'
             f'font-weight:800;letter-spacing:0.04em;text-transform:uppercase;">Asana</div>'
-            f'<div style="font-size:0.65rem;color:#888;">Populate a project task from the '
-            f'brief below and assign owners</div>'
+            f'<div style="font-size:0.65rem;color:#888;">Push design brief tasks to Asana '
+            f'and assign owners — pulls copy and campaign details automatically</div>'
             f'</div>'
             f'</div>',
             unsafe_allow_html=True,
         )
-
         _asana_col1, _asana_col2, _asana_col3 = st.columns([2, 2, 2])
-
         with _asana_col1:
             asana_project = st.selectbox(
                 "Asana project",
@@ -1782,7 +2054,6 @@ with tab_brief:
                 index=1,
                 key=f"asana_section_{camp['id']}",
             )
-
         with _asana_col2:
             asana_task_name = st.text_input(
                 "Task name",
@@ -1796,7 +2067,6 @@ with tab_brief:
                 key=f"asana_due_{camp['id']}",
                 help="Defaults to 5 days before send date — adjust as needed.",
             )
-
         with _asana_col3:
             _ASANA_OWNERS = [
                 "Anna", "Marketing Director", "Marketing Strategy",
@@ -1815,8 +2085,6 @@ with tab_brief:
                 default=["Design"],
                 key=f"asana_collab_{camp['id']}",
             )
-
-        # What gets pushed — preview the fields that will populate the task
         st.markdown(
             f'<div style="background:{COLORS["offwhite"]};border-radius:8px;'
             f'padding:10px 14px;margin:10px 0 12px;font-size:0.72rem;line-height:1.6;">'
@@ -1843,7 +2111,6 @@ with tab_brief:
             f'</div>',
             unsafe_allow_html=True,
         )
-
         _push_col, _status_col = st.columns([2, 3])
         with _push_col:
             if st.button(
@@ -1860,7 +2127,6 @@ with tab_brief:
                     "due":     asana_due.strftime("%b %d, %Y"),
                 }
                 st.rerun()
-
         with _status_col:
             _pushed = st.session_state.get(f"asana_pushed_{camp['id']}")
             if _pushed:

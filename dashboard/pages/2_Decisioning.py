@@ -32,6 +32,18 @@ def _sync_to_sheet(campaign: dict):
 inject_css()
 top_nav("Decisioning")
 
+# Seed plan_added from sheet if Planning hasn't synced yet this session
+if st.session_state.get("_last_sheet_sync") is None:
+    try:
+        from shared.sheets import load_all_campaigns as _load_all
+        _p, _d = _load_all()
+        st.session_state["plan_added"]  = _p
+        st.session_state["plan_drafts"] = _d
+        st.session_state["_last_sheet_sync"] = _dt.date.today()
+    except Exception:
+        st.session_state.setdefault("plan_added", [])
+        st.session_state.setdefault("plan_drafts", [])
+
 st.markdown("<h1>Decisioning</h1>", unsafe_allow_html=True)
 st.markdown(
     '<p style="font-family:\'Barlow\',sans-serif;font-size:0.85rem;color:#444;'
@@ -161,6 +173,7 @@ def _sync_to_planned(camp_id):
     for p in st.session_state.get("plan_added", []):
         if p.get("id") == camp_id:
             p["audiences"] = list(state.get("segments", []))
+            p["last_modified_by"] = state.get("saved_by", "")
             p["decisioning"] = {
                 "freq_cap":            state.get("freq_cap"),
                 "freq_cap_custom":     state.get("freq_cap_custom"),
@@ -171,6 +184,8 @@ def _sync_to_planned(camp_id):
                 "flow_priority_custom": state.get("flow_priority_custom"),
                 "flow_msg_overrides":  dict(state.get("flow_msg_overrides", {})),
                 "refinements":         list(state.get("refinements", [])),
+                "last_saved":          state.get("last_saved", ""),
+                "saved_by":            state.get("saved_by", ""),
             }
             break
 
@@ -277,14 +292,18 @@ with save_col:
         f'font-weight:600;margin-bottom:0.2rem;">Save changes</div>',
         unsafe_allow_html=True,
     )
-    last_saved_key = f"_last_saved_{camp['id']}"
-    last_saved = st.session_state.get(last_saved_key)
+    last_saved_key  = f"_last_saved_{camp['id']}"
+    last_saver_key  = f"_last_saver_{camp['id']}"
+    last_saved      = st.session_state.get(last_saved_key)
+    last_saver      = st.session_state.get(last_saver_key, "")
     if st.button("Save", type="primary", use_container_width=True,
                  key=f"save_{camp['id']}"):
-        now = _dt.datetime.now()
-        # Stamp last_saved into DSTATE so it travels with the campaign
+        now  = _dt.datetime.now()
+        user = current_user()
+        # Stamp identity + timestamp into DSTATE so they travel with the campaign
         if camp["id"] in DSTATE:
             DSTATE[camp["id"]]["last_saved"] = now
+            DSTATE[camp["id"]]["saved_by"]   = user
         _sync_to_planned(camp["id"])
         # Mirror updated campaign to Google Sheet
         _updated = next(
@@ -292,23 +311,26 @@ with save_col:
             None,
         )
         if _updated:
-            # Ensure last_saved reaches the decisioning sub-dict too
+            _updated["last_modified_by"] = user
             if "decisioning" in _updated:
                 _updated["decisioning"]["last_saved"] = now
+                _updated["decisioning"]["saved_by"]   = user
             _sync_to_sheet(_updated)
         st.session_state[last_saved_key] = now
-        st.toast(f"Saved decisioning for {camp['name']}", icon="✅")
+        st.session_state[last_saver_key] = user
+        st.toast(f"Saved by {user} · {now.strftime('%-I:%M %p')}", icon="✅")
         st.rerun()
     if last_saved:
         st.markdown(
-            f'<div style="font-size:0.62rem;color:{COLORS["muted"]};margin-top:2px;">'
-            f'Last saved {last_saved.strftime("%-I:%M:%S %p")}</div>',
+            f'<div style="font-size:0.62rem;color:{COLORS["muted"]};margin-top:2px;line-height:1.5;">'
+            f'<strong style="color:{COLORS["black"]};">{last_saver}</strong> · '
+            f'{last_saved.strftime("%-I:%M %p, %b %d")}</div>',
             unsafe_allow_html=True,
         )
     else:
         st.markdown(
             f'<div style="font-size:0.62rem;color:{COLORS["muted"]};margin-top:2px;">'
-            f'Auto-saved as you edit · click for confirmation</div>',
+            f'Unsaved · click to save & push to sheet</div>',
             unsafe_allow_html=True,
         )
 

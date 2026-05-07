@@ -32,7 +32,7 @@ Output: a shareable link with working, interactive sections.
 - This applies everywhere: campaign owners, task assignees, approvers, design briefs, etc.
 
 Valid owners:
-  - Anna
+  - Leadership
   - Marketing Director
   - Marketing Strategy
   - Brand & Social

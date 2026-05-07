@@ -255,32 +255,40 @@ def plot_theme(**overrides):
 
 
 def top_nav(current_page):
-    """Horizontal phase navigation bar shown at the top of every page."""
+    """Horizontal navigation bar shown at the top of every page."""
     pages = [
-        ("pages/0_Performance.py",  "Performance"),
-        ("pages/6_Campaigns.py",    "Campaign Dashboard"),
-        ("pages/1_Planning.py",     "Planning"),
-        ("pages/2_Decisioning.py",  "Decisioning"),
-        ("pages/3_Generation.py",   "Content Generation"),
-        ("pages/4_Design.py",       "Design"),
-        ("pages/5_Execution.py",    "QA Review"),
+        ("/",             "Performance"),
+        ("/Campaigns",    "Campaign Dashboard"),
+        ("/Planning",     "Planning"),
+        ("/Decisioning",  "Decisioning"),
+        ("/Generation",   "Content Generation"),
+        ("/Design",       "Design"),
+        ("/Execution",    "QA Review"),
     ]
-    cols = st.columns(len(pages))
-    for col, (path, label) in zip(cols, pages):
+    items = ""
+    for url, label in pages:
         is_current = (label.lower() == current_page.lower())
-        with col:
-            if is_current:
-                st.markdown(
-                    f'<div style="text-align:center;padding:6px 0;'
-                    f'border-bottom:2px solid {COLORS["black"]};'
-                    f'font-family:\'Barlow\',sans-serif;font-size:0.78rem;'
-                    f'font-weight:700;color:{COLORS["black"]};">{label}</div>',
-                    unsafe_allow_html=True,
-                )
-            else:
-                st.page_link(path, label=label, use_container_width=True)
+        if is_current:
+            items += (
+                f'<span style="font-family:\'Barlow\',sans-serif;font-size:0.82rem;'
+                f'font-weight:600;color:{COLORS["black"]};padding:10px 0;'
+                f'border-bottom:2px solid {COLORS["black"]};white-space:nowrap;">'
+                f'{label}</span>'
+            )
+        else:
+            items += (
+                f'<a href="{url}" target="_self" style="font-family:\'Barlow\',sans-serif;font-size:0.82rem;'
+                f'font-weight:400;color:#aaaaaa;text-decoration:none;padding:10px 0;'
+                f'border-bottom:2px solid transparent;white-space:nowrap;'
+                f'transition:color 0.15s;" '
+                f'onmouseover="this.style.color=\'#000\'" '
+                f'onmouseout="this.style.color=\'#aaaaaa\'">'
+                f'{label}</a>'
+            )
     st.markdown(
-        f'<div style="border-bottom:1px solid {COLORS["border"]};margin-bottom:1.5rem;"></div>',
+        f'<div style="display:flex;gap:28px;align-items:flex-end;'
+        f'border-bottom:1px solid {COLORS["border"]};margin-bottom:1.75rem;'
+        f'padding-bottom:0;">{items}</div>',
         unsafe_allow_html=True,
     )
 

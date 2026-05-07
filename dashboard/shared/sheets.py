@@ -185,6 +185,58 @@ def _campaign_to_row(c: dict) -> list:
     ]
 
 
+# ── Date parsing ─────────────────────────────────────────────────────────────
+_GS_EPOCH = datetime.date(1899, 12, 30)  # Google Sheets serial-number epoch
+
+def _parse_date(s: str):
+    """
+    Parse a date string tolerantly.
+    Handles:
+      - ISO:                  2026-05-15
+      - US short:             5/15/2026 or 05/15/2026
+      - EU short:             15/5/2026 or 15/05/2026
+      - US 2-digit year:      5/15/26
+      - Long month:           May 15, 2026
+      - Short month:          May 15, 2026
+      - Alt ISO:              2026/05/15
+      - Day-Month-Year:       15-May-2026 or 15 May 2026
+      - Google Sheets serial: integer string like "46161"
+    Returns a datetime.date or None.
+    """
+    if not s or not s.strip():
+        return None
+    s = s.strip()
+
+    # Google Sheets serial number (integer days since Dec 30 1899)
+    try:
+        serial = int(s)
+        if 30000 < serial < 60000:   # sanity range ≈ 1982–2064
+            return _GS_EPOCH + datetime.timedelta(days=serial)
+    except ValueError:
+        pass
+
+    for fmt in (
+        "%Y-%m-%d",    # ISO              2026-05-15
+        "%m/%d/%Y",    # US               5/15/2026
+        "%d/%m/%Y",    # EU               15/5/2026
+        "%m/%d/%y",    # US 2-digit       5/15/26
+        "%B %d, %Y",   # Long month       May 15, 2026
+        "%b %d, %Y",   # Short month      May 15, 2026
+        "%Y/%m/%d",    # Alt ISO          2026/05/15
+        "%d-%b-%Y",    # Day-Mon-Year     15-May-2026
+        "%d %b %Y",    # Day Mon Year     15 May 2026
+        "%d %B %Y",    # Day Month Year   15 May 2026
+        "%B %d %Y",    # Month Day Year   May 15 2026
+        "%m-%d-%Y",    # US dashes        5-15-2026
+        "%Y.%m.%d",    # Dots             2026.05.15
+    ):
+        try:
+            return datetime.datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 def load_planned_campaigns() -> list[dict]:
     """
@@ -217,11 +269,16 @@ def load_planned_campaigns() -> list[dict]:
         if not any(row):
             continue
 
+        # Skip fully anonymous rows (no name AND no id)
+        if not _col(row, "name") and not _col(row, "id"):
+            continue
+
         sd_str = _col(row, "send_date")
-        try:
-            send_date = datetime.date.fromisoformat(sd_str)
-        except (ValueError, TypeError):
-            continue  # skip rows without a parseable send_date
+        send_date = _parse_date(sd_str)
+        if send_date is None:
+            # Don't drop the campaign — use a far-future placeholder so it
+            # still appears in Upcoming and can be corrected via Edit.
+            send_date = datetime.date.today() + datetime.timedelta(days=365)
 
         camp_id = _col(row, "id") or f"P{len(campaigns)+1:03d}"
         audiences = _to_list(_col(row, "segments"))
@@ -264,6 +321,8 @@ def load_planned_campaigns() -> list[dict]:
         except (ValueError, TypeError):
             flow_msg_overrides = {}
 
+        last_modified_by = _col(row, "last_modified_by")
+
         has_decisioning = any([
             freq_cap, suppressions, flow_target, flow_priority, send_time, audiences
         ])
@@ -281,6 +340,7 @@ def load_planned_campaigns() -> list[dict]:
                 "refinements":          refinements,
                 "send_time":            send_time,
                 "last_saved":           last_saved,
+                "saved_by":             last_modified_by,
             }
 
         campaigns.append(camp)
@@ -293,7 +353,7 @@ def sync_all_campaigns(campaigns: list[dict]) -> None:
     sheet = _get_sheet()
     rows = [COLUMNS] + [_campaign_to_row(c) for c in campaigns]
     sheet.clear()
-    sheet.update("A1", rows)
+    sheet.update("A1", rows, value_input_option="RAW")
     print(f"[sheets] Synced {len(campaigns)} campaigns to sheet.")
 
 
@@ -312,7 +372,7 @@ def remove_campaign(campaign: dict) -> None:
     ws_removed = _get_or_create_removed_sheet(wb)
 
     # 1. Append to Removed Campaigns
-    ws_removed.append_row(removed_row, value_input_option="USER_ENTERED")
+    ws_removed.append_row(removed_row, value_input_option="RAW")
     print(f"[sheets] Archived campaign '{campaign_id}' to '{REMOVED_SHEET_NAME}'.")
 
     # 2. Find and delete from main sheet
@@ -377,13 +437,13 @@ def upsert_campaign(campaign: dict) -> None:
     data = sheet.get_all_values()
 
     if not data:
-        sheet.update("A1", [COLUMNS, _campaign_to_row(campaign)])
+        sheet.update("A1", [COLUMNS, _campaign_to_row(campaign)], value_input_option="RAW")
         print(f"[sheets] Created sheet with header + campaign {campaign['id']}.")
         return
 
     # Always keep header in sync with COLUMNS definition
     if data[0] != COLUMNS:
-        sheet.update("A1", [COLUMNS])
+        sheet.update("A1", [COLUMNS], value_input_option="RAW")
         data[0] = COLUMNS
         print("[sheets] Header updated.")
 
@@ -392,12 +452,12 @@ def upsert_campaign(campaign: dict) -> None:
     campaign_id = campaign["id"]
     for i, row in enumerate(data[1:], start=2):
         if len(row) > id_col and row[id_col] == campaign_id:
-            sheet.update(f"A{i}", [_campaign_to_row(campaign)])
+            sheet.update(f"A{i}", [_campaign_to_row(campaign)], value_input_option="RAW")
             print(f"[sheets] Updated campaign {campaign_id} at row {i}.")
             return
 
     # Not found — append
-    sheet.append_row(_campaign_to_row(campaign))
+    sheet.append_row(_campaign_to_row(campaign), value_input_option="RAW")
     print(f"[sheets] Appended new campaign {campaign_id}.")
 
 
