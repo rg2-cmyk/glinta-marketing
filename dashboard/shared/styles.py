@@ -295,7 +295,9 @@ div[data-testid="stPageLink"] > a:hover > p {
 </style>
 """, unsafe_allow_html=True)
 
-    cols = st.columns(len(pages), gap="small")
+    # Proportional widths so longer labels don't truncate
+    col_weights = [1.2, 1.8, 1.0, 1.3, 1.7, 1.0, 1.1]
+    cols = st.columns(col_weights, gap="small")
     for col, (page_path, label) in zip(cols, pages):
         is_current = (label.lower() == current_page.lower())
         with col:
