@@ -71,38 +71,69 @@ DECISION_ICONS = {
     "Copy": "✍️", "Personalizations": "🎯", "Design": "🎨",
 }
 
+KEY_MOMENT_RULES = {
+    "Product Launch": {
+        "tags": ["Product Launch", "Launch", "Drop"],
+        "categories": ["VIP/Loyalty"],
+        "icon": "🚀",
+        "label": "Product Launch",
+    },
+    "Studio Opening": {
+        "tags": ["Studio", "Event"],
+        "categories": ["Studio/Retail"],
+        "icon": "🏛",
+        "label": "Studio Opening",
+    },
+    "Promo / Sale": {
+        "tags": ["Flash Sale", "Discount", "Promo", "Sale"],
+        "categories": ["Promotional"],
+        "icon": "🏷",
+        "label": "Promo / Sale",
+    },
+    "Restock": {
+        "tags": ["Restock"],
+        "categories": ["Restock"],
+        "icon": "📦",
+        "label": "Restock",
+    },
+    "Holiday / Seasonal": {
+        "tags": ["Holiday", "Seasonal"],
+        "categories": ["Holiday/Seasonal"],
+        "icon": "🎉",
+        "label": "Holiday",
+    },
+    "Editorial": {
+        "tags": ["Editorial", "Gift", "Content"],
+        "categories": ["Editorial"],
+        "icon": "📰",
+        "label": "Editorial",
+    },
+}
+
 
 # ── Campaign normalizer ───────────────────────────────────────────────────────
 def _normalize(c: dict) -> dict:
-    """Coerce a plan_added campaign into the shape this dashboard expects."""
-    # Phase — sheet stores "planned" which maps to planning
     phase_raw = c.get("phase") or c.get("status") or "planning"
     phase = {"planned": "planning"}.get(phase_raw, phase_raw)
     if phase not in PHASE_ORDER:
         phase = "planning"
     phase_idx = PHASE_ORDER[phase]
 
-    # Send date — might be datetime or date
     sd = c.get("send_date")
     if hasattr(sd, "date"):
         sd = sd.date()
     if not isinstance(sd, dt.date):
         sd = TODAY + dt.timedelta(days=14)
 
-    # Audience / segment
     dec = c.get("decisioning") or {}
     audiences = c.get("audiences") or dec.get("segments") or []
     if isinstance(audiences, str):
         audiences = [a.strip() for a in audiences.split(",") if a.strip()]
     primary_segment = audiences[0] if audiences else c.get("segment", "TBD")
 
-    # Send time
     send_time = c.get("send_time") or dec.get("send_time") or ""
-
-    # Subject / copy
     subject = c.get("subject") or c.get("subject_line_draft") or ""
 
-    # Status fields derived from phase if not present
     brief_status = (
         c.get("brief_status") or
         ("Approved" if phase_idx >= 2 else "In Review" if phase_idx == 1 else "Not Started")
@@ -113,23 +144,29 @@ def _normalize(c: dict) -> dict:
     )
     qa_status = c.get("qa_status") or ("In Progress" if phase_idx == 4 else "Not Started")
 
-    # Owner — check Planning's _campaign_assignments first
     all_assigns = st.session_state.get("_campaign_assignments", {})
     camp_assigns = all_assigns.get(c.get("id", ""), [])
     owner = camp_assigns[0]["team"] if camp_assigns else c.get("assigned_to", "Unassigned")
 
-    # Next deadline
     offset = PHASE_DEADLINE_DAYS.get(phase, 7)
     next_deadline = sd - dt.timedelta(days=offset)
+
+    tags = c.get("tags") or []
+    category = c.get("category", "")
+    moment_type = "Other"
+    for mtype, rules in KEY_MOMENT_RULES.items():
+        if any(t in tags for t in rules["tags"]) or category in rules["categories"]:
+            moment_type = mtype
+            break
 
     return {
         "id":                   c.get("id", ""),
         "name":                 c.get("name", "Untitled"),
-        "category":             c.get("category", ""),
+        "category":             category,
         "channel":              (c.get("channel") or "email").lower(),
         "send_date":            sd,
         "phase":                phase,
-        "tags":                 c.get("tags") or [],
+        "tags":                 tags,
         "segment":              primary_segment,
         "audiences":            audiences,
         "audience_est":         c.get("audience_est") or 0,
@@ -148,6 +185,8 @@ def _normalize(c: dict) -> dict:
         "send_time":            send_time,
         "goal":                 c.get("goal") or "",
         "decisioning":          dec,
+        "moment_type":          moment_type,
+        "products":             c.get("products") or c.get("product") or "",
     }
 
 
@@ -316,7 +355,6 @@ def _render_detail_panel(camp):
     ch_bg  = "#1a1a1a" if camp["channel"] == "email" else "#f0f0f0"
     ch_txt = "#ffffff"  if camp["channel"] == "email" else COLORS["black"]
 
-    # Panel header
     send_time_str = f"  ·  {camp['send_time']}" if camp.get("send_time") else ""
     st.markdown(
         f'<div style="background:{COLORS["offwhite"]};border:1px solid {COLORS["border"]};'
@@ -397,13 +435,387 @@ def _render_detail_panel(camp):
     st.markdown('<div style="height:8px;"></div>', unsafe_allow_html=True)
 
 
+# ── Summary tab helpers ───────────────────────────────────────────────────────
+def _kpi_card(label, value, sub="", accent=False):
+    val_color = COLORS["black"]
+    border = f'border:1px solid {COLORS["border"]};'
+    bg = COLORS["white"]
+    return (
+        f'<div style="background:{bg};{border}border-radius:8px;padding:14px 16px;flex:1;min-width:0;">'
+        f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.6rem;font-weight:600;'
+        f'text-transform:uppercase;letter-spacing:0.08em;color:{COLORS["muted"]};margin-bottom:5px;">{label}</div>'
+        f'<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:1.7rem;font-weight:800;'
+        f'color:{val_color};line-height:1;">{value}</div>'
+        + (f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.65rem;color:{COLORS["muted"]};margin-top:3px;">{sub}</div>' if sub else "")
+        + f'</div>'
+    )
+
+
+def _section_header(text):
+    return (
+        f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.62rem;font-weight:700;'
+        f'text-transform:uppercase;letter-spacing:0.1em;color:{COLORS["black"]};'
+        f'border-bottom:2px solid {COLORS["black"]};padding-bottom:5px;margin:20px 0 12px;">{text}</div>'
+    )
+
+
+def fmt_rev(val):
+    if val >= 1_000_000:
+        return f"${val/1e6:.1f}M"
+    if val >= 1_000:
+        return f"${val/1e3:.1f}K"
+    return f"${val:,.0f}"
+
+
+def _render_summary_tab(all_campaigns):
+    import plotly.graph_objects as go
+
+    upcoming = [c for c in all_campaigns if c["send_date"] >= TODAY]
+    next30   = [c for c in upcoming if c["send_date"] <= TODAY + dt.timedelta(days=30)]
+
+    total_campaigns = len(upcoming)
+    total_audience  = sum(c["audience_est"] for c in upcoming)
+    total_rev_est   = sum(c["revenue_est"] for c in upcoming)
+    email_count     = sum(1 for c in upcoming if c["channel"] == "email")
+    sms_count       = sum(1 for c in upcoming if c["channel"] == "sms")
+    unique_segments = len({c["segment"] for c in upcoming if c["segment"] and c["segment"] != "TBD"})
+    high_priority   = sum(1 for c in upcoming if c["priority"] == "High")
+
+    # ── KPI Row ──────────────────────────────────────────────────────────────
+    kpi_html = (
+        '<div style="display:flex;gap:10px;margin-bottom:20px;">'
+        + _kpi_card("Campaigns Planned", str(total_campaigns), "upcoming sends")
+        + _kpi_card("Est. Audience Reach", f"{total_audience:,}" if total_audience < 1_000_000 else f"{total_audience/1e6:.1f}M", "total recipients")
+        + _kpi_card("Forecasted Revenue", fmt_rev(total_rev_est), "illustrative — sum of est.")
+        + _kpi_card("Unique Segments", str(unique_segments), "customer groups targeted")
+        + _kpi_card("High Priority", str(high_priority), "campaigns flagged")
+        + '</div>'
+    )
+    st.markdown(kpi_html, unsafe_allow_html=True)
+
+    # ── Channel split ─────────────────────────────────────────────────────────
+    channel_html = (
+        f'<div style="display:flex;gap:10px;margin-bottom:24px;">'
+        f'<div style="background:{COLORS["white"]};border:1px solid {COLORS["border"]};'
+        f'border-radius:8px;padding:12px 20px;display:flex;align-items:center;gap:14px;">'
+        f'<span style="background:#1a1a1a;color:#fff;padding:3px 10px;border-radius:4px;'
+        f'font-size:0.7rem;font-weight:700;font-family:\'Barlow\',sans-serif;">EMAIL</span>'
+        f'<span style="font-family:\'Barlow Condensed\',sans-serif;font-size:1.3rem;font-weight:800;'
+        f'color:{COLORS["black"]};">{email_count}</span>'
+        f'<span style="font-family:\'Barlow\',sans-serif;font-size:0.65rem;color:{COLORS["muted"]};">campaigns</span>'
+        f'</div>'
+        f'<div style="background:{COLORS["white"]};border:1px solid {COLORS["border"]};'
+        f'border-radius:8px;padding:12px 20px;display:flex;align-items:center;gap:14px;">'
+        f'<span style="background:{COLORS["offwhite"]};color:{COLORS["black"]};border:1px solid {COLORS["border"]};'
+        f'padding:3px 10px;border-radius:4px;font-size:0.7rem;font-weight:700;font-family:\'Barlow\',sans-serif;">SMS</span>'
+        f'<span style="font-family:\'Barlow Condensed\',sans-serif;font-size:1.3rem;font-weight:800;'
+        f'color:{COLORS["black"]};">{sms_count}</span>'
+        f'<span style="font-family:\'Barlow\',sans-serif;font-size:0.65rem;color:{COLORS["muted"]};">campaigns</span>'
+        f'</div>'
+        f'</div>'
+    )
+    st.markdown(channel_html, unsafe_allow_html=True)
+
+    # ── Key Moments ───────────────────────────────────────────────────────────
+    st.markdown(_section_header("Key Moments Coming Up"), unsafe_allow_html=True)
+
+    moment_groups = {}
+    for c in upcoming:
+        mt = c["moment_type"]
+        if mt not in ("Other",):
+            moment_groups.setdefault(mt, []).append(c)
+
+    if moment_groups:
+        for mtype, camps in sorted(moment_groups.items(), key=lambda x: min(c["send_date"] for c in x[1])):
+            rule  = KEY_MOMENT_RULES.get(mtype, {})
+            icon  = rule.get("icon", "•")
+            label = rule.get("label", mtype)
+            cols  = st.columns(min(len(camps), 3))
+            for col, camp in zip(cols, sorted(camps, key=lambda c: c["send_date"])):
+                with col:
+                    days_away = (camp["send_date"] - TODAY).days
+                    timing_label = (
+                        "Today" if days_away == 0 else
+                        f"In {days_away}d" if days_away > 0 else f"{abs(days_away)}d ago"
+                    )
+                    timing_color = COLORS["danger"] if days_away <= 0 else COLORS["black"]
+                    pri_dot = f'<span style="width:6px;height:6px;border-radius:50%;display:inline-block;margin-right:4px;background:{PRIORITY_COLORS.get(camp["priority"], COLORS["muted"])};"></span>'
+                    ch_bg2 = "#1a1a1a" if camp["channel"] == "email" else "#f0f0f0"
+                    ch_fg2 = "#fff" if camp["channel"] == "email" else COLORS["black"]
+                    st.markdown(
+                        f'<div style="background:{COLORS["white"]};border:1px solid {COLORS["border"]};'
+                        f'border-radius:8px;padding:13px 15px;margin-bottom:10px;">'
+                        f'<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">'
+                        f'<span style="font-size:0.85rem;">{icon}</span>'
+                        f'<span style="font-family:\'Barlow\',sans-serif;font-size:0.6rem;font-weight:600;'
+                        f'text-transform:uppercase;letter-spacing:0.07em;color:{COLORS["muted"]};">{label}</span>'
+                        f'<span style="margin-left:auto;background:{ch_bg2};color:{ch_fg2};'
+                        f'padding:1px 7px;border-radius:3px;font-size:0.58rem;font-weight:700;'
+                        f'font-family:\'Barlow\',sans-serif;">{camp["channel"].upper()}</span>'
+                        f'</div>'
+                        f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.82rem;font-weight:700;'
+                        f'color:{COLORS["black"]};margin-bottom:5px;overflow:hidden;text-overflow:ellipsis;'
+                        f'white-space:nowrap;">{camp["name"]}</div>'
+                        f'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
+                        f'<span style="font-family:\'Barlow\',sans-serif;font-size:0.68rem;'
+                        f'font-weight:600;color:{timing_color};">{camp["send_date"].strftime("%b %d")} · {timing_label}</span>'
+                        + (f'<span style="font-family:\'Barlow\',sans-serif;font-size:0.65rem;color:{COLORS["muted"]};">{camp["segment"][:28]}{"…" if len(camp["segment"]) > 28 else ""}</span>' if camp["segment"] and camp["segment"] != "TBD" else "")
+                        + f'</div>'
+                        + (f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.65rem;color:{COLORS["muted"]};margin-top:4px;">Est. {fmt_rev(camp["revenue_est"])}</div>' if camp["revenue_est"] else "")
+                        + f'</div>',
+                        unsafe_allow_html=True,
+                    )
+    else:
+        st.markdown(
+            f'<div style="color:{COLORS["muted"]};font-family:\'Barlow\',sans-serif;'
+            f'font-size:0.8rem;padding:12px 0;">No categorized key moments found.</div>',
+            unsafe_allow_html=True,
+        )
+
+    # ── Two-column: Status chart + Category breakdown ─────────────────────────
+    st.markdown(_section_header("Email & SMS Campaign Status"), unsafe_allow_html=True)
+
+    chart_col, breakdown_col = st.columns([1.5, 1])
+
+    with chart_col:
+        # Grouped bar: phases × channels
+        email_phases = [sum(1 for c in upcoming if c["channel"] == "email" and c["phase"] == p) for p in PHASES]
+        sms_phases   = [sum(1 for c in upcoming if c["channel"] == "sms"   and c["phase"] == p) for p in PHASES]
+        phase_labels = [PHASE_LABELS[p] for p in PHASES]
+
+        fig_status = go.Figure()
+        fig_status.add_trace(go.Bar(
+            name="Email",
+            x=phase_labels,
+            y=email_phases,
+            marker_color="#1a1a1a",
+            text=[str(v) if v else "" for v in email_phases],
+            textposition="outside",
+            textfont=dict(family="Barlow", size=11, color="#1a1a1a"),
+        ))
+        fig_status.add_trace(go.Bar(
+            name="SMS",
+            x=phase_labels,
+            y=sms_phases,
+            marker_color="#d0d0d0",
+            text=[str(v) if v else "" for v in sms_phases],
+            textposition="outside",
+            textfont=dict(family="Barlow", size=11, color="#666"),
+        ))
+        fig_status.update_layout(
+            barmode="group",
+            height=240,
+            margin=dict(l=0, r=0, t=10, b=0),
+            paper_bgcolor="white",
+            plot_bgcolor="white",
+            font=dict(family="Barlow", size=11, color="#333"),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+                        font=dict(family="Barlow", size=11)),
+            xaxis=dict(showgrid=False, zeroline=False, tickfont=dict(family="Barlow", size=11)),
+            yaxis=dict(showgrid=True, gridcolor="#f0f0f0", zeroline=False,
+                       tickfont=dict(family="Barlow", size=10), dtick=1),
+        )
+        st.plotly_chart(fig_status, use_container_width=True, config={"displayModeBar": False})
+
+    with breakdown_col:
+        # Category breakdown table
+        st.markdown(
+            f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.6rem;font-weight:700;'
+            f'text-transform:uppercase;letter-spacing:0.08em;color:{COLORS["muted"]};'
+            f'margin-bottom:8px;">By Category</div>',
+            unsafe_allow_html=True,
+        )
+        cat_counts = {}
+        for c in upcoming:
+            cat = c["category"] or "Uncategorized"
+            cat_counts[cat] = cat_counts.get(cat, 0) + 1
+
+        total_up = len(upcoming) or 1
+        for cat, cnt in sorted(cat_counts.items(), key=lambda x: -x[1]):
+            pct = cnt / total_up
+            bar_w = max(int(pct * 100), 2)
+            st.markdown(
+                f'<div style="margin-bottom:7px;">'
+                f'<div style="display:flex;justify-content:space-between;margin-bottom:2px;">'
+                f'<span style="font-family:\'Barlow\',sans-serif;font-size:0.72rem;color:{COLORS["black"]};'
+                f'font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px;">{cat}</span>'
+                f'<span style="font-family:\'Barlow\',sans-serif;font-size:0.72rem;font-weight:700;'
+                f'color:{COLORS["black"]};white-space:nowrap;margin-left:8px;">{cnt}</span>'
+                f'</div>'
+                f'<div style="background:{COLORS["offwhite"]};border-radius:3px;height:5px;overflow:hidden;">'
+                f'<div style="background:#1a1a1a;height:100%;width:{bar_w}%;border-radius:3px;"></div>'
+                f'</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+    # ── Segments hit ─────────────────────────────────────────────────────────
+    seg_list = [(c["segment"], c["audience_est"]) for c in upcoming if c["segment"] and c["segment"] != "TBD"]
+    if seg_list:
+        st.markdown(_section_header("Customer Segments Targeted"), unsafe_allow_html=True)
+        seg_dedup = {}
+        for seg, est in seg_list:
+            if seg not in seg_dedup or est > seg_dedup[seg]:
+                seg_dedup[seg] = est
+
+        seg_items = sorted(seg_dedup.items(), key=lambda x: -x[1])
+        seg_html = '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">'
+        for seg, est in seg_items:
+            size_str = f" · {est:,}" if est else ""
+            seg_html += (
+                f'<div style="background:{COLORS["offwhite"]};border:1px solid {COLORS["border"]};'
+                f'border-radius:6px;padding:7px 12px;">'
+                f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.72rem;font-weight:600;'
+                f'color:{COLORS["black"]};">{seg}</div>'
+                f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.62rem;color:{COLORS["muted"]};">'
+                f'{est:,} est. recipients</div>'
+                f'</div>'
+            )
+        seg_html += '</div>'
+        st.markdown(seg_html, unsafe_allow_html=True)
+
+    # ── Priority breakdown ────────────────────────────────────────────────────
+    st.markdown(_section_header("Priority Breakdown"), unsafe_allow_html=True)
+    pri_cols = st.columns(3)
+    for col, pri in zip(pri_cols, ["High", "Medium", "Low"]):
+        with col:
+            pri_camps = [c for c in upcoming if c["priority"] == pri]
+            pri_color = PRIORITY_COLORS.get(pri, COLORS["muted"])
+            names_html = "".join(
+                f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.68rem;'
+                f'color:{COLORS["muted"]};border-bottom:1px solid {COLORS["border"]};'
+                f'padding:4px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'
+                f'{c["name"][:38]}{"…" if len(c["name"]) > 38 else ""}</div>'
+                for c in sorted(pri_camps, key=lambda c: c["send_date"])[:5]
+            )
+            more = f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.62rem;color:{COLORS["muted"]};margin-top:4px;">+{len(pri_camps)-5} more</div>' if len(pri_camps) > 5 else ""
+            st.markdown(
+                f'<div style="background:{COLORS["white"]};border:1px solid {COLORS["border"]};'
+                f'border-radius:8px;padding:12px 14px;">'
+                f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.62rem;font-weight:700;'
+                f'text-transform:uppercase;letter-spacing:0.08em;color:{pri_color};margin-bottom:6px;">'
+                f'{pri} Priority — {len(pri_camps)}</div>'
+                + (names_html or f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.68rem;color:{COLORS["muted"]};">None</div>')
+                + more
+                + f'</div>',
+                unsafe_allow_html=True,
+            )
+
+    # ── Forecasted Performance (Illustrative) ─────────────────────────────────
+    st.markdown(
+        f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.62rem;font-weight:700;'
+        f'text-transform:uppercase;letter-spacing:0.1em;color:{COLORS["black"]};'
+        f'border-bottom:2px solid {COLORS["black"]};padding-bottom:5px;margin:20px 0 4px;">'
+        f'Forecasted Performance</div>'
+        f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.65rem;color:{COLORS["muted"]};'
+        f'margin-bottom:12px;font-style:italic;">Illustrative — based on campaign revenue estimates and historical benchmarks</div>',
+        unsafe_allow_html=True,
+    )
+
+    perf_left, perf_right = st.columns([1.6, 1])
+
+    with perf_left:
+        # Weekly revenue forecast bar chart
+        if upcoming:
+            min_date = min(c["send_date"] for c in upcoming)
+            max_date = max(c["send_date"] for c in upcoming)
+            # Build weekly buckets
+            week_starts = []
+            d = min_date - dt.timedelta(days=min_date.weekday())
+            while d <= max_date + dt.timedelta(days=6):
+                week_starts.append(d)
+                d += dt.timedelta(days=7)
+
+            week_rev_email = []
+            week_rev_sms   = []
+            week_labels    = []
+            for ws in week_starts:
+                we = ws + dt.timedelta(days=6)
+                email_rev = sum(c["revenue_est"] for c in upcoming if ws <= c["send_date"] <= we and c["channel"] == "email")
+                sms_rev   = sum(c["revenue_est"] for c in upcoming if ws <= c["send_date"] <= we and c["channel"] == "sms")
+                week_rev_email.append(email_rev)
+                week_rev_sms.append(sms_rev)
+                week_labels.append(ws.strftime("%-d %b"))
+
+            fig_perf = go.Figure()
+            fig_perf.add_trace(go.Bar(
+                name="Email",
+                x=week_labels,
+                y=week_rev_email,
+                marker_color="#1a1a1a",
+            ))
+            fig_perf.add_trace(go.Bar(
+                name="SMS",
+                x=week_labels,
+                y=week_rev_sms,
+                marker_color="#d0d0d0",
+            ))
+            fig_perf.update_layout(
+                barmode="stack",
+                height=230,
+                margin=dict(l=0, r=0, t=10, b=0),
+                paper_bgcolor="white",
+                plot_bgcolor="white",
+                font=dict(family="Barlow", size=11, color="#333"),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+                            font=dict(family="Barlow", size=11)),
+                xaxis=dict(showgrid=False, zeroline=False, tickfont=dict(family="Barlow", size=10)),
+                yaxis=dict(
+                    showgrid=True, gridcolor="#f0f0f0", zeroline=False,
+                    tickfont=dict(family="Barlow", size=10),
+                    tickprefix="$",
+                ),
+            )
+            st.plotly_chart(fig_perf, use_container_width=True, config={"displayModeBar": False})
+        else:
+            st.markdown(
+                f'<div style="color:{COLORS["muted"]};font-family:\'Barlow\',sans-serif;font-size:0.8rem;">No upcoming campaigns.</div>',
+                unsafe_allow_html=True,
+            )
+
+    with perf_right:
+        # Forecast summary metrics
+        avg_rev = total_rev_est / total_campaigns if total_campaigns else 0
+        top_camps = sorted(upcoming, key=lambda c: -c["revenue_est"])[:3]
+        st.markdown(
+            f'<div style="background:{COLORS["offwhite"]};border:1px solid {COLORS["border"]};'
+            f'border-radius:8px;padding:14px 16px;">'
+            f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.6rem;font-weight:700;'
+            f'text-transform:uppercase;letter-spacing:0.08em;color:{COLORS["muted"]};margin-bottom:10px;">'
+            f'Forecast Summary</div>'
+            f'<div style="display:flex;justify-content:space-between;margin-bottom:7px;">'
+            f'<span style="font-family:\'Barlow\',sans-serif;font-size:0.72rem;color:{COLORS["muted"]};">Total Est. Revenue</span>'
+            f'<span style="font-family:\'Barlow\',sans-serif;font-size:0.72rem;font-weight:700;color:{COLORS["black"]};">{fmt_rev(total_rev_est)}</span>'
+            f'</div>'
+            f'<div style="display:flex;justify-content:space-between;margin-bottom:7px;">'
+            f'<span style="font-family:\'Barlow\',sans-serif;font-size:0.72rem;color:{COLORS["muted"]};">Avg. per Campaign</span>'
+            f'<span style="font-family:\'Barlow\',sans-serif;font-size:0.72rem;font-weight:700;color:{COLORS["black"]};">{fmt_rev(avg_rev)}</span>'
+            f'</div>'
+            f'<div style="border-top:1px solid {COLORS["border"]};margin:8px 0;"></div>'
+            f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.6rem;font-weight:700;'
+            f'text-transform:uppercase;letter-spacing:0.08em;color:{COLORS["muted"]};margin-bottom:7px;">'
+            f'Top Campaigns by Est. Revenue</div>'
+            + "".join(
+                f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">'
+                f'<span style="font-family:\'Barlow\',sans-serif;font-size:0.68rem;color:{COLORS["black"]};'
+                f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px;">{c["name"]}</span>'
+                f'<span style="font-family:\'Barlow\',sans-serif;font-size:0.68rem;font-weight:700;'
+                f'color:{COLORS["black"]};white-space:nowrap;margin-left:6px;">{fmt_rev(c["revenue_est"])}</span>'
+                f'</div>'
+                for c in top_camps
+            )
+            + f'</div>',
+            unsafe_allow_html=True,
+        )
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE
 # ══════════════════════════════════════════════════════════════════════════════
 st.markdown("<h1>Campaign Dashboard</h1>", unsafe_allow_html=True)
 st.markdown(
     '<p style="font-family:\'Barlow\',sans-serif;font-size:0.85rem;color:#444;'
-    'margin:-0.4rem 0 1.5rem;">All planned campaigns — click ▼ to see decisions and assign tasks.</p>',
+    'margin:-0.4rem 0 1.5rem;">All planned campaigns — executive overview and detail tracking.</p>',
     unsafe_allow_html=True,
 )
 
@@ -411,206 +823,230 @@ st.markdown(
 raw_campaigns = st.session_state.get("plan_added", [])
 all_campaigns = [_normalize(c) for c in raw_campaigns if c.get("name")]
 
-# ── Empty state ───────────────────────────────────────────────────────────────
-if not all_campaigns:
-    st.markdown(
-        f'<div style="background:{COLORS["offwhite"]};border:1px solid {COLORS["border"]};'
-        f'border-radius:8px;padding:40px 32px;text-align:center;margin-top:2rem;">'
-        f'<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:1.4rem;'
-        f'font-weight:700;color:{COLORS["black"]};margin-bottom:8px;">No campaigns yet</div>'
-        f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.85rem;color:{COLORS["muted"]};">'
-        f'Create campaigns in the <strong>Planning</strong> page to see them tracked here.</div>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-    st.stop()
+# ── Tabs ──────────────────────────────────────────────────────────────────────
+tab_summary, tab_detail = st.tabs(["Marketing Calendar Summary", "Campaign Detail"])
 
-# ── Summary stats ─────────────────────────────────────────────────────────────
-phase_counts = {p: sum(1 for c in all_campaigns if c["phase"] == p) for p in PHASES}
-overdue_count = sum(1 for c in all_campaigns if c["next_deadline"] < TODAY)
-
-stat_cols = st.columns(7)
-stats = [
-    ("Total",       str(len(all_campaigns)),                 COLORS["black"]),
-    ("Planning",    str(phase_counts.get("planning", 0)),    PHASE_BADGE_COLORS["planning"][1]),
-    ("Decisioning", str(phase_counts.get("decisioning", 0)), PHASE_BADGE_COLORS["decisioning"][1]),
-    ("Generation",  str(phase_counts.get("generation", 0)),  PHASE_BADGE_COLORS["generation"][1]),
-    ("Design",      str(phase_counts.get("design", 0)),      PHASE_BADGE_COLORS["design"][1]),
-    ("Execution",   str(phase_counts.get("execution", 0)),   PHASE_BADGE_COLORS["execution"][1]),
-    ("Overdue",     str(overdue_count),                      COLORS["danger"] if overdue_count else COLORS["muted"]),
-]
-for col, (label, val, color) in zip(stat_cols, stats):
-    with col:
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 1 — Marketing Calendar Summary
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_summary:
+    if not all_campaigns:
         st.markdown(
             f'<div style="background:{COLORS["offwhite"]};border:1px solid {COLORS["border"]};'
-            f'border-radius:6px;padding:10px 14px;text-align:center;">'
-            f'<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:1.6rem;'
-            f'font-weight:800;color:{color};line-height:1;">{val}</div>'
-            f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.62rem;color:{COLORS["muted"]};'
-            f'text-transform:uppercase;letter-spacing:0.07em;margin-top:3px;">{label}</div>'
+            f'border-radius:8px;padding:40px 32px;text-align:center;margin-top:2rem;">'
+            f'<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:1.4rem;'
+            f'font-weight:700;color:{COLORS["black"]};margin-bottom:8px;">No campaigns yet</div>'
+            f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.85rem;color:{COLORS["muted"]};">'
+            f'Create campaigns in the <strong>Planning</strong> page to see the summary here.</div>'
             f'</div>',
             unsafe_allow_html=True,
         )
+    else:
+        _render_summary_tab(all_campaigns)
 
-st.markdown('<div style="margin-top:1.5rem;"></div>', unsafe_allow_html=True)
-
-# ── Filters ───────────────────────────────────────────────────────────────────
-fc1, fc2, fc3, fc4 = st.columns([2, 2, 2, 2])
-with fc1:
-    filter_phase = st.selectbox(
-        "Phase", ["All"] + [PHASE_LABELS[p] for p in PHASES], key="cd_filter_phase"
-    )
-with fc2:
-    filter_channel = st.selectbox("Channel", ["All", "Email", "SMS"], key="cd_filter_channel")
-with fc3:
-    filter_priority = st.selectbox("Priority", ["All", "High", "Medium", "Low"], key="cd_filter_priority")
-with fc4:
-    owners = sorted({c["assigned_to"] for c in all_campaigns})
-    filter_owner = st.selectbox("Owner", ["All"] + owners, key="cd_filter_owner")
-
-campaigns = list(all_campaigns)
-if filter_phase != "All":
-    phase_key = next(p for p in PHASES if PHASE_LABELS[p] == filter_phase)
-    campaigns = [c for c in campaigns if c["phase"] == phase_key]
-if filter_channel != "All":
-    campaigns = [c for c in campaigns if c["channel"] == filter_channel.lower()]
-if filter_priority != "All":
-    campaigns = [c for c in campaigns if c["priority"] == filter_priority]
-if filter_owner != "All":
-    campaigns = [c for c in campaigns if c["assigned_to"] == filter_owner]
-
-campaigns = sorted(campaigns, key=lambda c: c["send_date"])
-
-# ── Table ─────────────────────────────────────────────────────────────────────
-st.markdown('<div style="margin-top:0.5rem;"></div>', unsafe_allow_html=True)
-
-header_cols = st.columns([0.5, 3.0, 0.8, 1.1, 1.0, 1.3, 1.0, 0.8, 0.45])
-headers = ["", "Campaign", "Channel", "Phase", "Owner", "Next Deadline", "Send Date", "Priority", ""]
-hdr_style = (
-    f'font-family:\'Barlow\',sans-serif;font-size:0.6rem;font-weight:600;'
-    f'text-transform:uppercase;letter-spacing:0.08em;color:{COLORS["muted"]};padding:6px 0;'
-)
-for col, h in zip(header_cols, headers):
-    with col:
-        st.markdown(f'<div style="{hdr_style}">{h}</div>', unsafe_allow_html=True)
-
-st.markdown(
-    f'<div style="border-top:2px solid {COLORS["black"]};margin-bottom:0;"></div>',
-    unsafe_allow_html=True,
-)
-
-if not campaigns:
-    st.markdown(
-        f'<div style="color:{COLORS["muted"]};font-family:\'Barlow\',sans-serif;'
-        f'font-size:0.85rem;padding:20px 0;">No campaigns match the current filters.</div>',
-        unsafe_allow_html=True,
-    )
-
-for camp in campaigns:
-    is_selected = st.session_state["cd_selected"] == camp["id"]
-    deadline    = camp["next_deadline"]
-    pri_color   = PRIORITY_COLORS.get(camp["priority"], COLORS["muted"])
-
-    row_cols = st.columns([0.5, 3.0, 0.8, 1.1, 1.0, 1.3, 1.0, 0.8, 0.45])
-
-    with row_cols[0]:
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 2 — Campaign Detail
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_detail:
+    if not all_campaigns:
         st.markdown(
-            f'<div style="display:flex;align-items:center;justify-content:center;height:40px;">'
-            f'<span style="width:7px;height:7px;border-radius:50%;background:{pri_color};'
-            f'display:inline-block;"></span></div>',
+            f'<div style="background:{COLORS["offwhite"]};border:1px solid {COLORS["border"]};'
+            f'border-radius:8px;padding:40px 32px;text-align:center;margin-top:2rem;">'
+            f'<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:1.4rem;'
+            f'font-weight:700;color:{COLORS["black"]};margin-bottom:8px;">No campaigns yet</div>'
+            f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.85rem;color:{COLORS["muted"]};">'
+            f'Create campaigns in the <strong>Planning</strong> page to see them tracked here.</div>'
+            f'</div>',
             unsafe_allow_html=True,
         )
+        st.stop()
 
-    with row_cols[1]:
-        tags = camp.get("tags") or []
-        tags_html = " ".join(
-            f'<span style="background:{COLORS["offwhite"]};border:1px solid {COLORS["border"]};'
-            f'color:{COLORS["muted"]};padding:1px 6px;border-radius:3px;font-size:0.58rem;">{t}</span>'
-            for t in tags[:2]
-        )
-        goal_chip = ""
-        if camp.get("goal") and not tags:
-            goal_chip = (
-                f'<span style="background:{COLORS["offwhite"]};border:1px solid {COLORS["border"]};'
-                f'color:{COLORS["muted"]};padding:1px 6px;border-radius:3px;font-size:0.58rem;">'
-                f'{camp["goal"]}</span>'
+    # ── Summary stats ─────────────────────────────────────────────────────────
+    phase_counts = {p: sum(1 for c in all_campaigns if c["phase"] == p) for p in PHASES}
+    overdue_count = sum(1 for c in all_campaigns if c["next_deadline"] < TODAY)
+
+    stat_cols = st.columns(7)
+    stats = [
+        ("Total",       str(len(all_campaigns)),                 COLORS["black"]),
+        ("Planning",    str(phase_counts.get("planning", 0)),    PHASE_BADGE_COLORS["planning"][1]),
+        ("Decisioning", str(phase_counts.get("decisioning", 0)), PHASE_BADGE_COLORS["decisioning"][1]),
+        ("Generation",  str(phase_counts.get("generation", 0)),  PHASE_BADGE_COLORS["generation"][1]),
+        ("Design",      str(phase_counts.get("design", 0)),      PHASE_BADGE_COLORS["design"][1]),
+        ("Execution",   str(phase_counts.get("execution", 0)),   PHASE_BADGE_COLORS["execution"][1]),
+        ("Overdue",     str(overdue_count),                      COLORS["danger"] if overdue_count else COLORS["muted"]),
+    ]
+    for col, (label, val, color) in zip(stat_cols, stats):
+        with col:
+            st.markdown(
+                f'<div style="background:{COLORS["offwhite"]};border:1px solid {COLORS["border"]};'
+                f'border-radius:6px;padding:10px 14px;text-align:center;">'
+                f'<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:1.6rem;'
+                f'font-weight:800;color:{color};line-height:1;">{val}</div>'
+                f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.62rem;color:{COLORS["muted"]};'
+                f'text-transform:uppercase;letter-spacing:0.07em;margin-top:3px;">{label}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
             )
-        st.markdown(
-            f'<div style="padding:7px 0;">'
-            f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.82rem;font-weight:600;'
-            f'color:{COLORS["black"]};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'
-            f'max-width:260px;">{camp["name"]}</div>'
-            f'<div style="margin-top:3px;">{tags_html or goal_chip}</div>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
 
-    with row_cols[2]:
-        st.markdown(
-            f'<div style="display:flex;align-items:center;height:40px;">'
-            + channel_badge_html(camp["channel"]) + "</div>",
-            unsafe_allow_html=True,
-        )
+    st.markdown('<div style="margin-top:1.5rem;"></div>', unsafe_allow_html=True)
 
-    with row_cols[3]:
-        st.markdown(
-            f'<div style="display:flex;align-items:center;height:40px;">'
-            + phase_badge_html(camp["phase"]) + "</div>",
-            unsafe_allow_html=True,
+    # ── Filters ───────────────────────────────────────────────────────────────
+    fc1, fc2, fc3, fc4 = st.columns([2, 2, 2, 2])
+    with fc1:
+        filter_phase = st.selectbox(
+            "Phase", ["All"] + [PHASE_LABELS[p] for p in PHASES], key="cd_filter_phase"
         )
+    with fc2:
+        filter_channel = st.selectbox("Channel", ["All", "Email", "SMS"], key="cd_filter_channel")
+    with fc3:
+        filter_priority = st.selectbox("Priority", ["All", "High", "Medium", "Low"], key="cd_filter_priority")
+    with fc4:
+        owners = sorted({c["assigned_to"] for c in all_campaigns})
+        filter_owner = st.selectbox("Owner", ["All"] + owners, key="cd_filter_owner")
 
-    with row_cols[4]:
-        st.markdown(
-            f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.75rem;'
-            f'color:{COLORS["black"]};display:flex;align-items:center;height:40px;">'
-            f'{camp["assigned_to"]}</div>',
-            unsafe_allow_html=True,
-        )
+    campaigns = list(all_campaigns)
+    if filter_phase != "All":
+        phase_key = next(p for p in PHASES if PHASE_LABELS[p] == filter_phase)
+        campaigns = [c for c in campaigns if c["phase"] == phase_key]
+    if filter_channel != "All":
+        campaigns = [c for c in campaigns if c["channel"] == filter_channel.lower()]
+    if filter_priority != "All":
+        campaigns = [c for c in campaigns if c["priority"] == filter_priority]
+    if filter_owner != "All":
+        campaigns = [c for c in campaigns if c["assigned_to"] == filter_owner]
 
-    with row_cols[5]:
-        delta = (deadline - TODAY).days
-        dl_color = (
-            COLORS["danger"] if delta <= 0 else
-            COLORS["warn"]   if delta <= 2 else
-            COLORS["black"]
-        )
-        overdue_mark = " ⚠" if delta < 0 else ""
-        st.markdown(
-            f'<div style="padding:7px 0;">'
-            f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.78rem;'
-            f'font-weight:600;color:{dl_color};">{deadline.strftime("%b %d")}{overdue_mark}</div>'
-            f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.62rem;'
-            f'color:{COLORS["muted"]};">{camp["next_deadline_label"]}</div>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
+    campaigns = sorted(campaigns, key=lambda c: c["send_date"])
 
-    with row_cols[6]:
-        st.markdown(
-            f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.78rem;'
-            f'color:{COLORS["black"]};display:flex;align-items:center;height:40px;">'
-            f'{camp["send_date"].strftime("%b %d, %Y")}</div>',
-            unsafe_allow_html=True,
-        )
+    # ── Table ─────────────────────────────────────────────────────────────────
+    st.markdown('<div style="margin-top:0.5rem;"></div>', unsafe_allow_html=True)
 
-    with row_cols[7]:
-        st.markdown(
-            f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.72rem;font-weight:600;'
-            f'color:{pri_color};display:flex;align-items:center;height:40px;">'
-            f'{camp["priority"]}</div>',
-            unsafe_allow_html=True,
-        )
-
-    with row_cols[8]:
-        btn_label = "▲" if is_selected else "▼"
-        if st.button(btn_label, key=f"cd_view_{camp['id']}", type="secondary"):
-            st.session_state["cd_selected"] = None if is_selected else camp["id"]
-            st.rerun()
+    header_cols = st.columns([0.5, 3.0, 0.8, 1.1, 1.0, 1.3, 1.0, 0.8, 0.45])
+    headers = ["", "Campaign", "Channel", "Phase", "Owner", "Next Deadline", "Send Date", "Priority", ""]
+    hdr_style = (
+        f'font-family:\'Barlow\',sans-serif;font-size:0.6rem;font-weight:600;'
+        f'text-transform:uppercase;letter-spacing:0.08em;color:{COLORS["muted"]};padding:6px 0;'
+    )
+    for col, h in zip(header_cols, headers):
+        with col:
+            st.markdown(f'<div style="{hdr_style}">{h}</div>', unsafe_allow_html=True)
 
     st.markdown(
-        f'<div style="border-bottom:1px solid {COLORS["border"]};"></div>',
+        f'<div style="border-top:2px solid {COLORS["black"]};margin-bottom:0;"></div>',
         unsafe_allow_html=True,
     )
 
-    if is_selected:
-        _render_detail_panel(camp)
+    if not campaigns:
+        st.markdown(
+            f'<div style="color:{COLORS["muted"]};font-family:\'Barlow\',sans-serif;'
+            f'font-size:0.85rem;padding:20px 0;">No campaigns match the current filters.</div>',
+            unsafe_allow_html=True,
+        )
+
+    for camp in campaigns:
+        is_selected = st.session_state["cd_selected"] == camp["id"]
+        deadline    = camp["next_deadline"]
+        pri_color   = PRIORITY_COLORS.get(camp["priority"], COLORS["muted"])
+
+        row_cols = st.columns([0.5, 3.0, 0.8, 1.1, 1.0, 1.3, 1.0, 0.8, 0.45])
+
+        with row_cols[0]:
+            st.markdown(
+                f'<div style="display:flex;align-items:center;justify-content:center;height:40px;">'
+                f'<span style="width:7px;height:7px;border-radius:50%;background:{pri_color};'
+                f'display:inline-block;"></span></div>',
+                unsafe_allow_html=True,
+            )
+
+        with row_cols[1]:
+            tags = camp.get("tags") or []
+            tags_html = " ".join(
+                f'<span style="background:{COLORS["offwhite"]};border:1px solid {COLORS["border"]};'
+                f'color:{COLORS["muted"]};padding:1px 6px;border-radius:3px;font-size:0.58rem;">{t}</span>'
+                for t in tags[:2]
+            )
+            goal_chip = ""
+            if camp.get("goal") and not tags:
+                goal_chip = (
+                    f'<span style="background:{COLORS["offwhite"]};border:1px solid {COLORS["border"]};'
+                    f'color:{COLORS["muted"]};padding:1px 6px;border-radius:3px;font-size:0.58rem;">'
+                    f'{camp["goal"]}</span>'
+                )
+            st.markdown(
+                f'<div style="padding:7px 0;">'
+                f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.82rem;font-weight:600;'
+                f'color:{COLORS["black"]};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'
+                f'max-width:260px;">{camp["name"]}</div>'
+                f'<div style="margin-top:3px;">{tags_html or goal_chip}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+        with row_cols[2]:
+            st.markdown(
+                f'<div style="display:flex;align-items:center;height:40px;">'
+                + channel_badge_html(camp["channel"]) + "</div>",
+                unsafe_allow_html=True,
+            )
+
+        with row_cols[3]:
+            st.markdown(
+                f'<div style="display:flex;align-items:center;height:40px;">'
+                + phase_badge_html(camp["phase"]) + "</div>",
+                unsafe_allow_html=True,
+            )
+
+        with row_cols[4]:
+            st.markdown(
+                f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.75rem;'
+                f'color:{COLORS["black"]};display:flex;align-items:center;height:40px;">'
+                f'{camp["assigned_to"]}</div>',
+                unsafe_allow_html=True,
+            )
+
+        with row_cols[5]:
+            delta = (deadline - TODAY).days
+            dl_color = (
+                COLORS["danger"] if delta <= 0 else
+                COLORS["warn"]   if delta <= 2 else
+                COLORS["black"]
+            )
+            overdue_mark = " ⚠" if delta < 0 else ""
+            st.markdown(
+                f'<div style="padding:7px 0;">'
+                f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.78rem;'
+                f'font-weight:600;color:{dl_color};">{deadline.strftime("%b %d")}{overdue_mark}</div>'
+                f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.62rem;'
+                f'color:{COLORS["muted"]};">{camp["next_deadline_label"]}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+        with row_cols[6]:
+            st.markdown(
+                f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.78rem;'
+                f'color:{COLORS["black"]};display:flex;align-items:center;height:40px;">'
+                f'{camp["send_date"].strftime("%b %d, %Y")}</div>',
+                unsafe_allow_html=True,
+            )
+
+        with row_cols[7]:
+            st.markdown(
+                f'<div style="font-family:\'Barlow\',sans-serif;font-size:0.72rem;font-weight:600;'
+                f'color:{pri_color};display:flex;align-items:center;height:40px;">'
+                f'{camp["priority"]}</div>',
+                unsafe_allow_html=True,
+            )
+
+        with row_cols[8]:
+            btn_label = "▲" if is_selected else "▼"
+            if st.button(btn_label, key=f"cd_view_{camp['id']}", type="secondary"):
+                st.session_state["cd_selected"] = None if is_selected else camp["id"]
+                st.rerun()
+
+        st.markdown(
+            f'<div style="border-bottom:1px solid {COLORS["border"]};"></div>',
+            unsafe_allow_html=True,
+        )
+
+        if is_selected:
+            _render_detail_panel(camp)
