@@ -13,12 +13,15 @@ from shared.data import load_data, load_segments, fmt_revenue
 inject_css()
 top_nav("QA Review")
 
-# Seed plan_added from sheet if Planning hasn't synced yet this session
+# Seed plan_added from sheet if Planning hasn't synced yet this session.
+# Merges sheet data with any locally-added campaigns not yet saved to the sheet.
 if st.session_state.get("_last_sheet_sync") is None:
     try:
         from shared.sheets import load_all_campaigns as _load_all
         _p, _d = _load_all()
-        st.session_state["plan_added"]  = _p
+        _sheet_ids = {c.get("id") for c in _p + _d}
+        _local_only = [c for c in st.session_state.get("plan_added", []) if c.get("id") not in _sheet_ids]
+        st.session_state["plan_added"]  = _p + _local_only
         st.session_state["plan_drafts"] = _d
         st.session_state["_last_sheet_sync"] = date.today()
     except Exception:

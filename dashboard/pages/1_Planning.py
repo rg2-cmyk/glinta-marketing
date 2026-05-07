@@ -311,6 +311,11 @@ def _do_sheet_sync(show_toast=False):
 if st.session_state.get("_last_sheet_sync") is None:
     if _do_sheet_sync():
         st.rerun()
+    # Whether sync succeeded or failed, mark as attempted so other pages
+    # don't independently seed from sheet and potentially overwrite plan_added
+    # with stale data that's missing locally-added campaigns.
+    if st.session_state.get("_last_sheet_sync") is None:
+        st.session_state["_last_sheet_sync"] = date.today()
 
 
 tab_cal, tab_upcoming, tab_plan = st.tabs([
@@ -2171,7 +2176,6 @@ with tab_upcoming:
                         st.session_state["plan_drafts"][_j] = _upd; break
                 st.session_state["_campaign_assignments"][target_id] = _new_assignments
                 _push_and_refresh(_upd)
-                _do_sheet_sync()
                 st.session_state.pop("_upcoming_edit_id", None); st.rerun()
             if _b3.button("Add to Calendar", use_container_width=True, type="primary"):
                 _upd = _build_updated("planned")
@@ -2180,7 +2184,6 @@ with tab_upcoming:
                 st.session_state["plan_added"].append(_upd)
                 st.session_state["_campaign_assignments"][target_id] = _new_assignments
                 _push_and_refresh(_upd)
-                _do_sheet_sync()
                 st.session_state.pop("_upcoming_edit_id", None); st.rerun()
         else:
             if _b2.button("Save changes", use_container_width=True, type="primary"):
@@ -2190,7 +2193,6 @@ with tab_upcoming:
                         st.session_state["plan_added"][_j] = _upd
                         _push_and_refresh(_upd); break
                 st.session_state["_campaign_assignments"][target_id] = _new_assignments
-                _do_sheet_sync()
                 st.session_state.pop("_upcoming_edit_id", None); st.rerun()
 
     # ── Lightweight assign-task dialog ────────────────────────────────────────
@@ -2942,7 +2944,7 @@ with tab_plan:
                 st.session_state["plan_drafts"].pop(_edit)
             st.session_state["plan_added"].extend(entries)
             for _e in entries:
-                _sync_to_sheet(_e)
+                _push_and_refresh(_e)
             _clear_form()
             st.rerun()
 
