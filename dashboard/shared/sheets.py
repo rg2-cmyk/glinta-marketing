@@ -1,15 +1,18 @@
 """
 Google Sheets sync for Glinta campaign data.
 
-Read path: public CSV export (no auth needed — sheet must be "Anyone with link - Viewer").
-Write path: gcloud ADC + impersonation (local dev only; writes are no-ops on Streamlit Cloud).
+Auth priority:
+  1. Streamlit Secrets — key "gcp_service_account" (dict of service-account JSON).
+     Set this on Streamlit Cloud via the app's Secrets settings.
+  2. gcloud Application Default Credentials — automatic on local dev after
+     `gcloud auth application-default login`.
+
+Both paths use the same service account so no sheet-sharing changes are needed.
 """
 
 import datetime
 import json
 import gspread
-import pandas as pd
-import requests
 from google.auth import default, impersonated_credentials
 from google.oauth2 import service_account
 
@@ -20,8 +23,6 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
-# Public CSV export URL for sheet1 (gid=0) — works when sheet is "Anyone with link - Viewer"
-_CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid=0"
 
 COLUMNS = [
     # ── Planning ──────────────────────────────────────────────────
@@ -36,22 +37,41 @@ COLUMNS = [
     "flow_msg_overrides",
     "refinements",
     "last_saved",
+    "last_modified_by",
 ]
 
-# ── Read via public CSV (no auth) ─────────────────────────────────────────────
-def _read_sheet_csv() -> list[list]:
-    """Fetch sheet1 as a list-of-rows via the public CSV export URL."""
-    resp = requests.get(_CSV_URL, timeout=15)
-    resp.raise_for_status()
-    from io import StringIO
-    df = pd.read_csv(StringIO(resp.text), dtype=str, keep_default_na=False)
-    header = df.columns.tolist()
-    rows = df.values.tolist()
-    return [header] + rows
-
-
-# ── Auth (write path, local dev only) ─────────────────────────────────────────
+# ── Auth ──────────────────────────────────────────────────────────────────────
 def _get_client():
+    """
+    Return an authenticated gspread client.
+
+    Path 1 — Streamlit Secrets (Streamlit Cloud):
+        Add a [gcp_service_account] section to your app's Secrets with the full
+        contents of the service-account JSON file. Example structure:
+            [gcp_service_account]
+            type = "service_account"
+            project_id = "..."
+            private_key_id = "..."
+            private_key = "-----BEGIN RSA PRIVATE KEY-----\\n...\\n-----END RSA PRIVATE KEY-----\\n"
+            client_email = "..."
+            ...
+
+    Path 2 — gcloud ADC (local dev):
+        Run `gcloud auth application-default login` once; no further config needed.
+    """
+    # ── Path 1: Streamlit Secrets ─────────────────────────────────────────────
+    try:
+        import streamlit as st
+        if "gcp_service_account" in st.secrets:
+            creds = service_account.Credentials.from_service_account_info(
+                dict(st.secrets["gcp_service_account"]),
+                scopes=SCOPES,
+            )
+            return gspread.authorize(creds)
+    except Exception:
+        pass  # no Streamlit context or secrets not set — fall through to ADC
+
+    # ── Path 2: gcloud Application Default Credentials ────────────────────────
     source_creds, _ = default()
     target_creds = impersonated_credentials.Credentials(
         source_credentials=source_creds,
@@ -60,15 +80,6 @@ def _get_client():
         lifetime=3600,
     )
     return gspread.authorize(target_creds)
-
-
-def _writes_available() -> bool:
-    """True only when running locally with gcloud ADC configured."""
-    try:
-        _get_client()
-        return True
-    except Exception:
-        return False
 
 
 REMOVED_SHEET_NAME = "Removed Campaigns"
@@ -170,16 +181,19 @@ def _campaign_to_row(c: dict) -> list:
         flow_msg_overrides,
         refinements,
         last_saved,
+        c.get("last_modified_by", ""),
     ]
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
 def load_planned_campaigns() -> list[dict]:
     """
-    Read all campaigns from the sheet via public CSV export (no auth required).
-    Sheet must be shared as "Anyone with link - Viewer".
+    Read all campaigns from the sheet and return them as plan_added-compatible dicts.
+    Each dict has the same shape as entries added via Planning → Plan a Campaign.
+    Campaigns with decisioning fields also include a 'decisioning' sub-dict.
     """
-    data = _read_sheet_csv()
+    sheet = _get_sheet()
+    data = sheet.get_all_values()
 
     if not data or len(data) < 2:
         return []
@@ -213,22 +227,23 @@ def load_planned_campaigns() -> list[dict]:
         audiences = _to_list(_col(row, "segments"))
 
         camp = {
-            "id":        camp_id,
-            "name":      _col(row, "name"),
-            "category":  _col(row, "category"),
-            "channel":   _col(row, "channel", "email"),
-            "send_date": send_date,
-            "status":    _col(row, "phase", "planned"),
-            "phase":     _col(row, "phase", "planned"),
-            "subject":   _col(row, "subject_line_draft"),
-            "goal":      _col(row, "goal"),
-            "product":   _col(row, "product"),
-            "studio":    _col(row, "studio"),
-            "owner":      _col(row, "owner"),
-            "priority":   _col(row, "priority", "Medium"),
-            "tags":       _to_list(_col(row, "tags")),
-            "audiences":  audiences,
-            "created_by": _col(row, "created_by"),
+            "id":             camp_id,
+            "name":           _col(row, "name"),
+            "category":       _col(row, "category"),
+            "channel":        _col(row, "channel", "email"),
+            "send_date":      send_date,
+            "status":         _col(row, "phase", "planned"),
+            "phase":          _col(row, "phase", "planned"),
+            "subject":        _col(row, "subject_line_draft"),
+            "goal":           _col(row, "goal"),
+            "product":        _col(row, "product"),
+            "studio":         _col(row, "studio"),
+            "owner":          _col(row, "owner"),
+            "priority":       _col(row, "priority", "Medium"),
+            "tags":           _to_list(_col(row, "tags")),
+            "audiences":      audiences,
+            "created_by":     _col(row, "created_by"),
+            "last_modified_by": _col(row, "last_modified_by"),
         }
 
         # Decisioning fields — restore as sub-dict if any are present
@@ -254,18 +269,18 @@ def load_planned_campaigns() -> list[dict]:
         ])
         if has_decisioning:
             camp["decisioning"] = {
-                "segments":            audiences,
-                "freq_cap":            freq_cap,
-                "freq_cap_custom":     freq_cap_custom,
-                "suppressions":        suppressions,
-                "suppressions_custom": suppressions_custom,
-                "flow_target":         flow_target,
-                "flow_priority":       flow_priority,
+                "segments":             audiences,
+                "freq_cap":             freq_cap,
+                "freq_cap_custom":      freq_cap_custom,
+                "suppressions":         suppressions,
+                "suppressions_custom":  suppressions_custom,
+                "flow_target":          flow_target,
+                "flow_priority":        flow_priority,
                 "flow_priority_custom": flow_priority_custom,
-                "flow_msg_overrides":  flow_msg_overrides,
-                "refinements":         refinements,
-                "send_time":           send_time,
-                "last_saved":          last_saved,
+                "flow_msg_overrides":   flow_msg_overrides,
+                "refinements":          refinements,
+                "send_time":            send_time,
+                "last_saved":           last_saved,
             }
 
         campaigns.append(camp)
@@ -285,20 +300,15 @@ def sync_all_campaigns(campaigns: list[dict]) -> None:
 def remove_campaign(campaign: dict) -> None:
     """
     Move a campaign from sheet1 to the 'Removed Campaigns' worksheet.
-    No-op when gcloud ADC is not available (e.g. Streamlit Cloud).
+    Uses a single workbook connection so both operations share one auth session.
+    Raises on any error so the caller can surface it to the user.
     """
-    try:
-        _get_client()  # raises if auth unavailable
-    except Exception:
-        print("[sheets] remove_campaign: write auth unavailable, skipping.")
-        return
-
     campaign_id = campaign.get("id", "")
     removed_at  = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     removed_row = _campaign_to_row(campaign) + [removed_at]
 
-    wb        = _get_workbook()
-    ws_main   = wb.sheet1
+    wb         = _get_workbook()
+    ws_main    = wb.sheet1
     ws_removed = _get_or_create_removed_sheet(wb)
 
     # 1. Append to Removed Campaigns
@@ -351,7 +361,7 @@ def load_all_campaigns() -> tuple:
     """
     removed_ids = load_removed_campaign_ids()
     all_camps = load_planned_campaigns()
-    active = [c for c in all_camps if c.get("id", "") not in removed_ids]
+    active  = [c for c in all_camps if c.get("id", "") not in removed_ids]
     planned = [c for c in active if c.get("status", "planned") != "draft"]
     drafts  = [c for c in active if c.get("status", "planned") == "draft"]
     return planned, drafts
@@ -360,14 +370,10 @@ def load_all_campaigns() -> tuple:
 def upsert_campaign(campaign: dict) -> None:
     """
     Insert or update a single campaign row, matched by id.
-    No-op when gcloud ADC is not available (e.g. Streamlit Cloud).
+    Updates in-place if id exists, appends if new.
+    Also re-writes the header if columns have changed.
     """
-    try:
-        sheet = _get_sheet()
-    except Exception:
-        print("[sheets] upsert_campaign: write auth unavailable, skipping.")
-        return
-
+    sheet = _get_sheet()
     data = sheet.get_all_values()
 
     if not data:
@@ -375,11 +381,13 @@ def upsert_campaign(campaign: dict) -> None:
         print(f"[sheets] Created sheet with header + campaign {campaign['id']}.")
         return
 
+    # Always keep header in sync with COLUMNS definition
     if data[0] != COLUMNS:
         sheet.update("A1", [COLUMNS])
         data[0] = COLUMNS
         print("[sheets] Header updated.")
 
+    # Find existing row by id
     id_col = COLUMNS.index("id")
     campaign_id = campaign["id"]
     for i, row in enumerate(data[1:], start=2):
@@ -388,6 +396,7 @@ def upsert_campaign(campaign: dict) -> None:
             print(f"[sheets] Updated campaign {campaign_id} at row {i}.")
             return
 
+    # Not found — append
     sheet.append_row(_campaign_to_row(campaign))
     print(f"[sheets] Appended new campaign {campaign_id}.")
 
@@ -408,7 +417,6 @@ def _get_or_create_comments_sheet(wb):
     # Migrate header if resolved column is missing
     existing_header = ws.row_values(1)
     if "resolved" not in existing_header:
-        # Resize the sheet to fit the new column, then write the header
         ws.resize(rows=2000, cols=len(COMMENT_COLUMNS))
         col_letter = chr(ord("A") + len(COMMENT_COLUMNS) - 1)
         ws.update(f"{col_letter}1", [["resolved"]])
@@ -477,7 +485,6 @@ def post_comment(comment: dict) -> None:
 def resolve_comment(comment_id: str) -> None:
     """
     Mark a comment as resolved by setting the 'resolved' column to '1'.
-    Finds the row by comment id.
     """
     wb = _get_workbook()
     ws = _get_or_create_comments_sheet(wb)

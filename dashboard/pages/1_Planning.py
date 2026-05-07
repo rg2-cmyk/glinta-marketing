@@ -1,11 +1,7 @@
 import sys, re as _re, json as _json, html as _html
 import calendar as _cal_lib
-import getpass as _getpass
 from pathlib import Path
 from datetime import date, timedelta, datetime as _datetime
-
-# Detect the OS-level username of whoever is running the app
-_CURRENT_USER = _getpass.getuser()
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -101,6 +97,26 @@ from shared.owners import TEAMS, ROLES, render_assignment_widget, assignment_sum
 inject_css()
 top_nav("Planning")
 
+# ── Identity selector — persists in session_state["_app_user"] ────────────────
+_ALL_OWNERS = [
+    "Anna", "Marketing Director", "Marketing Strategy",
+    "Brand & Social", "Growth Marketing", "Retail Marketing",
+    "Merchandising & Planning", "Design", "Operations", "Data",
+]
+with st.sidebar:
+    st.markdown(
+        '<div style="font-size:11px;font-weight:600;color:#888;'
+        'text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">'
+        'Logged in as</div>',
+        unsafe_allow_html=True,
+    )
+    st.selectbox(
+        "Logged in as",
+        _ALL_OWNERS,
+        label_visibility="collapsed",
+        key="_app_user",
+    )
+
 # ── Early session-state init (needed before tabs for quick-add processing) ────
 if "plan_added"  not in st.session_state: st.session_state["plan_added"]  = []
 if "plan_drafts" not in st.session_state: st.session_state["plan_drafts"] = []
@@ -125,10 +141,13 @@ if _qa_raw:
             "channel":   _qa.get("channel", "email"),
             "send_date": _qa_date,
             "audiences": [],
-            "product":   "",
-            "studio":    "",
-            "status":    "planned",
-            "created_by": _CURRENT_USER,
+            "product":         "",
+            "studio":          "",
+            "status":          "planned",
+            "owner":           st.session_state.get("_app_user", ""),
+            "created_by":      st.session_state.get("_app_user", ""),
+            "last_modified_by": st.session_state.get("_app_user", ""),
+            "last_saved":      _datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
         st.session_state["plan_added"].append(_qa_entry)
         _sync_to_sheet(_qa_entry)
@@ -185,7 +204,7 @@ _STATUS_STYLE = {
     "mock data":       ("background:#f5f000;color:#000;",      "Mock data"),
     "connected":       ("background:#caf30b;color:#000;",      "Connected"),
     "not connected":   ("background:#f2f2f2;color:#888;",      "Not connected"),
-    "tbd":             ("background:#e8c5ff;color:#000;",      "TBD"),
+    "tbd":             ("background:#e8c5ff;color:#000;",      "Connection Unknown"),
 }
 
 _conn_html = (
@@ -1239,7 +1258,7 @@ function showModal(d) {
       }).join('');
       return (
         '<div style="margin-top:10px;border-top:2px solid #000;padding-top:10px;">' +
-          '<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:10px;' +
+          '<div style="font-family:Barlow Condensed,sans-serif;font-size:10px;' +
                 'font-weight:800;letter-spacing:0.1em;text-transform:uppercase;color:#000;' +
                 'margin-bottom:6px;">Decisioning</div>' +
           '<div style="font-size:9px;font-weight:700;color:#888;text-transform:uppercase;' +
@@ -2226,14 +2245,30 @@ with tab_upcoming:
             unsafe_allow_html=True,
         )
 
-        # Col 2 — Date, channel, category, owner
-        _owner = pc.get("owner", "")
+        # Col 2 — Date, channel, category, owner, last modified
+        _owner        = pc.get("owner", "")
+        _last_mod_by  = pc.get("last_modified_by", "")
+        _last_saved   = pc.get("last_saved", "")
+        # Format last_saved as "May 7, 2:34 PM" if it's a full timestamp
+        try:
+            _ls_dt = _datetime.strptime(_last_saved, "%Y-%m-%d %H:%M:%S")
+            _ls_fmt = _ls_dt.strftime("%-m/%-d, %-I:%M %p")
+        except Exception:
+            _ls_fmt = _last_saved
+        _last_mod_html = ""
+        if _last_mod_by:
+            _ts_part = f" · {_ls_fmt}" if _ls_fmt else ""
+            _last_mod_html = (
+                f'<div style="font-size:9px;color:#bbb;margin-top:3px;line-height:1.3;">'
+                f'Last edit: {_last_mod_by}{_ts_part}</div>'
+            )
         col_meta.markdown(
             f'<div style="padding:4px 0 8px;font-family:Barlow,sans-serif;">'
             f'<div style="font-size:13px;font-weight:700;margin-bottom:4px;">{_d_str}</div>'
             f'<div style="font-size:11px;color:#555;margin-bottom:2px;">{_ch_icon} {_ch_lbl}</div>'
             + (f'<div style="font-size:11px;color:#777;margin-bottom:1px;">{_cat}</div>' if _cat else "")
-            + (f'<div style="font-size:10px;color:#999;">👤 {_owner}</div>' if _owner else "")
+            + (f'<div style="font-size:10px;color:#999;margin-bottom:1px;">👤 {_owner}</div>' if _owner else "")
+            + _last_mod_html
             + f'</div>',
             unsafe_allow_html=True,
         )
@@ -2577,7 +2612,7 @@ with tab_plan:
         st.session_state["nc_auds"]  = []
         st.session_state["nc_prod"]  = "(none)"
         st.session_state["nc_stu"]   = "(none)"
-        st.session_state["nc_owner"] = "Anna"
+        st.session_state["nc_owner"] = st.session_state.get("_app_user", "Anna")
         st.session_state["plan_edit_idx"] = None
 
     # ── Handle "Use category" button clicks from the right panel ─────────────
@@ -2744,11 +2779,12 @@ with tab_plan:
             "Brand & Social", "Growth Marketing", "Retail Marketing",
             "Merchandising & Planning", "Design", "Operations", "Data",
         ]
+        _app_user_now = st.session_state.get("_app_user", _OWNERS[0])
         _owner_default = (
-            _draft_prefill.get("owner", _OWNERS[0]) if _draft_prefill
-            else st.session_state.get("nc_owner", _OWNERS[0])
+            _draft_prefill.get("owner", _app_user_now) if _draft_prefill
+            else st.session_state.get("nc_owner", _app_user_now)
         )
-        _owner_default = _owner_default if _owner_default in _OWNERS else _OWNERS[0]
+        _owner_default = _owner_default if _owner_default in _OWNERS else _app_user_now
         nc_owner = st.selectbox("Owner", _OWNERS,
                                 index=_OWNERS.index(_owner_default),
                                 key="nc_owner")
@@ -2817,9 +2853,11 @@ with tab_plan:
                     "audiences": nc_auds,
                     "product":   nc_prod if nc_prod != "(none)" else "",
                     "studio":    nc_stu  if nc_stu  != "(none)" else "",
-                    "owner":     nc_owner,
-                    "status":    status,
-                    "created_by": _CURRENT_USER,
+                    "owner":            nc_owner,
+                    "status":           status,
+                    "created_by":       st.session_state.get("_app_user", nc_owner),
+                    "last_modified_by": st.session_state.get("_app_user", nc_owner),
+                    "last_saved":       _datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 })
             return entries
 
@@ -3093,8 +3131,25 @@ with tab_plan:
             _ch_badge = "📧 Email" if _dr["channel"]=="email" else "📱 SMS"
             _d_str = _dr["send_date"].strftime("%b %-d, %Y") if isinstance(_dr.get("send_date"), date) else "—"
             _dc1, _dc2, _dc3 = st.columns([4, 1, 1])
-            _dr_subj = _dr.get("subject","")
-            _dr_goal = _dr.get("goal","")
+            _dr_subj     = _dr.get("subject","")
+            _dr_goal     = _dr.get("goal","")
+            _dr_owner    = _dr.get("owner","")
+            _dr_last_mod = _dr.get("last_modified_by","")
+            _dr_last_ts  = _dr.get("last_saved","")
+            try:
+                _dr_ts_fmt = _datetime.strptime(_dr_last_ts, "%Y-%m-%d %H:%M:%S").strftime("%-m/%-d, %-I:%M %p")
+            except Exception:
+                _dr_ts_fmt = _dr_last_ts
+            _dr_meta_parts = []
+            if _dr_owner:
+                _dr_meta_parts.append(f"👤 {_dr_owner}")
+            if _dr_last_mod:
+                _ts_sfx = f" · {_dr_ts_fmt}" if _dr_ts_fmt else ""
+                _dr_meta_parts.append(f"Last edit: {_dr_last_mod}{_ts_sfx}")
+            _dr_meta_html = (
+                f'<div style="font-size:9px;color:#bbb;margin-top:3px;">'
+                + " &nbsp;·&nbsp; ".join(_dr_meta_parts) + "</div>"
+            ) if _dr_meta_parts else ""
             _dc1.markdown(
                 f'<div style="padding:4px 0;">'
                 f'<span style="background:#f0f0f0;border:1px solid #ccc;border-radius:3px;'
@@ -3103,6 +3158,7 @@ with tab_plan:
                 f'<span style="color:#888;font-size:11px;margin-left:8px;">{_ch_badge} · {_d_str}</span>'
                 + (f'<div style="font-size:10px;color:#555;font-style:italic;margin-top:2px;margin-left:4px;">"{_dr_subj}"</div>' if _dr_subj else "")
                 + (f'<div style="font-size:10px;color:#888;margin-left:4px;">Goal: {_dr_goal}</div>' if _dr_goal else "")
+                + _dr_meta_html
                 + f'</div>',
                 unsafe_allow_html=True
             )
@@ -3121,7 +3177,12 @@ with tab_plan:
                 st.session_state["plan_edit_idx"] = _i
                 st.rerun()
             if _dc3.button("Add to Calendar", key=f"promote_draft_{_i}"):
-                _entry = dict(_dr, status="planned")
+                _entry = dict(
+                    _dr,
+                    status="planned",
+                    last_modified_by=st.session_state.get("_app_user", ""),
+                    last_saved=_datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                )
                 st.session_state["plan_added"].append(_entry)
                 st.session_state["plan_drafts"].pop(_i)
                 _sync_to_sheet(_entry)

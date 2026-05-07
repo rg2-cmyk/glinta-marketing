@@ -238,6 +238,7 @@ def plot_theme(**overrides):
         plot_bgcolor=COLORS["white"],
         font=dict(family="Barlow, sans-serif", color="#555555", size=11),
         title_font=dict(family="Barlow, sans-serif", size=11, color=COLORS["black"]),
+        title_text="",
         title_x=0,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
                     font=dict(size=10, family="Barlow, sans-serif"),
