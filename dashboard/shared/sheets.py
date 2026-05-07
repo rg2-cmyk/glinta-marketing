@@ -62,24 +62,33 @@ def _get_client():
     # ── Path 1: Streamlit Secrets ─────────────────────────────────────────────
     try:
         import streamlit as st
+        # We're in a Streamlit context — only use configured secrets, never fall through to ADC
         if "gcp_service_account" in st.secrets:
             creds = service_account.Credentials.from_service_account_info(
                 dict(st.secrets["gcp_service_account"]),
                 scopes=SCOPES,
             )
             return gspread.authorize(creds)
+        raise RuntimeError("Google Sheets not connected.")
+    except RuntimeError:
+        raise
     except Exception:
-        pass  # no Streamlit context or secrets not set — fall through to ADC
+        pass  # no Streamlit context — fall through to local ADC
 
     # ── Path 2: gcloud Application Default Credentials ────────────────────────
-    source_creds, _ = default()
-    target_creds = impersonated_credentials.Credentials(
-        source_credentials=source_creds,
-        target_principal=SERVICE_ACCOUNT_EMAIL,
-        target_scopes=SCOPES,
-        lifetime=3600,
-    )
-    return gspread.authorize(target_creds)
+    try:
+        source_creds, _ = default()
+        target_creds = impersonated_credentials.Credentials(
+            source_credentials=source_creds,
+            target_principal=SERVICE_ACCOUNT_EMAIL,
+            target_scopes=SCOPES,
+            lifetime=3600,
+        )
+        return gspread.authorize(target_creds)
+    except Exception as e:
+        raise RuntimeError(
+            "Google Sheets not connected. Add [gcp_service_account] to Streamlit Secrets."
+        ) from e
 
 
 REMOVED_SHEET_NAME = "Removed Campaigns"
