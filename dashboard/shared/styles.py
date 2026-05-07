@@ -257,38 +257,61 @@ def plot_theme(**overrides):
 def top_nav(current_page):
     """Horizontal navigation bar shown at the top of every page."""
     pages = [
-        ("/",             "Performance"),
-        ("/Campaigns",    "Campaign Dashboard"),
-        ("/Planning",     "Planning"),
-        ("/Decisioning",  "Decisioning"),
-        ("/Generation",   "Content Generation"),
-        ("/Design",       "Design"),
-        ("/Execution",    "QA Review"),
+        ("pages/0_Performance.py", "Performance"),
+        ("pages/6_Campaigns.py",   "Campaign Dashboard"),
+        ("pages/1_Planning.py",    "Planning"),
+        ("pages/2_Decisioning.py", "Decisioning"),
+        ("pages/3_Generation.py",  "Content Generation"),
+        ("pages/4_Design.py",      "Design"),
+        ("pages/5_Execution.py",   "QA Review"),
     ]
-    items = ""
-    for url, label in pages:
+
+    # Style page_link elements to look like the existing nav design
+    st.markdown("""
+<style>
+div[data-testid="stPageLink"] > a {
+    text-decoration: none !important;
+    background: transparent !important;
+    padding: 0 !important;
+    border-radius: 0 !important;
+}
+div[data-testid="stPageLink"] > a > span[data-testid="stPageLinkIcon"] {
+    display: none !important;
+}
+div[data-testid="stPageLink"] > a > p {
+    font-family: 'Barlow', sans-serif !important;
+    font-size: 0.82rem !important;
+    font-weight: 400 !important;
+    color: #aaaaaa !important;
+    margin: 0 !important;
+    padding: 10px 0 !important;
+    white-space: nowrap !important;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s;
+}
+div[data-testid="stPageLink"] > a:hover > p {
+    color: #000000 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+    cols = st.columns(len(pages), gap="small")
+    for col, (page_path, label) in zip(cols, pages):
         is_current = (label.lower() == current_page.lower())
-        if is_current:
-            items += (
-                f'<span style="font-family:\'Barlow\',sans-serif;font-size:0.82rem;'
-                f'font-weight:600;color:{COLORS["black"]};padding:10px 0;'
-                f'border-bottom:2px solid {COLORS["black"]};white-space:nowrap;">'
-                f'{label}</span>'
-            )
-        else:
-            items += (
-                f'<a href="{url}" target="_self" style="font-family:\'Barlow\',sans-serif;font-size:0.82rem;'
-                f'font-weight:400;color:#aaaaaa;text-decoration:none;padding:10px 0;'
-                f'border-bottom:2px solid transparent;white-space:nowrap;'
-                f'transition:color 0.15s;" '
-                f'onmouseover="this.style.color=\'#000\'" '
-                f'onmouseout="this.style.color=\'#aaaaaa\'">'
-                f'{label}</a>'
-            )
+        with col:
+            if is_current:
+                st.markdown(
+                    f'<div style="padding:10px 0;border-bottom:2px solid {COLORS["black"]};display:inline-block;">'
+                    f'<span style="font-family:\'Barlow\',sans-serif;font-size:0.82rem;'
+                    f'font-weight:600;color:{COLORS["black"]};white-space:nowrap;">{label}</span>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.page_link(page_path, label=label, icon=None)
+
     st.markdown(
-        f'<div style="display:flex;gap:28px;align-items:flex-end;'
-        f'border-bottom:1px solid {COLORS["border"]};margin-bottom:1.75rem;'
-        f'padding-bottom:0;">{items}</div>',
+        f'<div style="border-bottom:1px solid {COLORS["border"]};margin-bottom:1.75rem;margin-top:-0.75rem;"></div>',
         unsafe_allow_html=True,
     )
 
