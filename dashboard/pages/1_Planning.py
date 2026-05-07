@@ -24,7 +24,9 @@ try:
         resolve_comment as _sheets_resolve_comment,
     )
     _SHEETS_ENABLED = True
-except Exception:
+except Exception as _sheets_import_err:
+    print(f"[sheets] import failed: {_sheets_import_err}")
+    import traceback; traceback.print_exc()
     _SHEETS_ENABLED = False
     _sheets_load = None
     _sheets_load_all = None
@@ -1971,10 +1973,7 @@ with tab_upcoming:
     _sync_err = st.session_state.get("_sheet_sync_error")
     _sync_bar_left, _sync_bar_right = st.columns([5, 1])
     if _sync_err:
-        _sync_bar_left.markdown(
-            f'<div style="font-size:11px;color:#c00;padding:4px 0;">⚠ Sheet sync error: {_html.escape(_sync_err)}</div>',
-            unsafe_allow_html=True,
-        )
+        _sync_bar_left.error(f"Sheet sync error: {_sync_err}")
     elif _SHEETS_ENABLED:
         _last_str = (st.session_state["_last_sheet_sync"].strftime("%b %-d")
                      if st.session_state.get("_last_sheet_sync") else "never")
@@ -1984,6 +1983,7 @@ with tab_upcoming:
             unsafe_allow_html=True,
         )
     else:
+        _sync_bar_left.warning("Google Sheets not connected — check logs for import error")
         _sync_bar_left.markdown(
             '<div style="font-size:11px;color:#bbb;padding:4px 0;">Google Sheets not connected</div>',
             unsafe_allow_html=True,
