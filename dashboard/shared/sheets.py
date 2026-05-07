@@ -13,6 +13,7 @@ import datetime
 import json
 import gspread
 from google.auth import default, impersonated_credentials
+from google.oauth2 import service_account
 
 # ── Config ────────────────────────────────────────────────────────────────────
 SERVICE_ACCOUNT_EMAIL = "glinta-sheets-bot@glinta-marketing-studs-495303.iam.gserviceaccount.com"
@@ -39,6 +40,18 @@ COLUMNS = [
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
 def _get_client():
+    # On Streamlit Cloud: use service account key stored in st.secrets
+    try:
+        import streamlit as st
+        if "gcp_service_account" in st.secrets:
+            creds = service_account.Credentials.from_service_account_info(
+                dict(st.secrets["gcp_service_account"]),
+                scopes=SCOPES,
+            )
+            return gspread.authorize(creds)
+    except Exception:
+        pass
+    # Local dev: use gcloud ADC + impersonation
     source_creds, _ = default()
     target_creds = impersonated_credentials.Credentials(
         source_credentials=source_creds,
