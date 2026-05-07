@@ -50,18 +50,20 @@ def _get_client():
     """
     Return an authenticated gspread client.
 
+    Both paths use service-account impersonation so the SA's token (which has
+    Sheets scope) is what actually hits the API — the caller only needs
+    cloud-platform scope, which gcloud ADC and the Streamlit-Secrets OAuth
+    refresh token both provide.
+
     Path 1 — Streamlit Secrets (Streamlit Cloud):
         Add a [gcp_user_credentials] section to your app's Secrets with:
             refresh_token, client_id, client_secret
         from ~/.config/gcloud/application_default_credentials.json.
-        Uses your OAuth credentials directly — no service account key needed.
 
     Path 2 — gcloud ADC (local dev):
         Run `gcloud auth application-default login` once; no further config needed.
     """
-    # ── Path 1: Streamlit Secrets — direct user OAuth (no impersonation) ────────
-    # Using user credentials directly is more reliable on Streamlit Cloud than
-    # impersonation, which can fail if the IAM token endpoint is unreachable.
+    # ── Path 1: Streamlit Secrets ────────────────────────────────────────────────
     _secrets_configured = False
     try:
         import streamlit as st
@@ -69,19 +71,24 @@ def _get_client():
             _secrets_configured = True
             from google.oauth2.credentials import Credentials as _OAuthCreds
             _s = st.secrets["gcp_user_credentials"]
-            creds = _OAuthCreds(
+            source_creds = _OAuthCreds(
                 token=None,
                 refresh_token=_s["refresh_token"],
                 client_id=_s["client_id"],
                 client_secret=_s["client_secret"],
                 token_uri="https://oauth2.googleapis.com/token",
             )
-            return gspread.authorize(creds)
+            target_creds = impersonated_credentials.Credentials(
+                source_credentials=source_creds,
+                target_principal=SERVICE_ACCOUNT_EMAIL,
+                target_scopes=SCOPES,
+                lifetime=3600,
+            )
+            return gspread.authorize(target_creds)
     except ImportError:
         pass  # streamlit not importable — fall through to ADC
     except Exception as _e:
         if _secrets_configured:
-            # Secrets were found but auth failed — surface this rather than silently failing
             raise RuntimeError(f"Google Sheets: Streamlit Secrets auth failed — {_e}") from _e
 
     # ── Path 2: gcloud Application Default Credentials (local dev) ────────────

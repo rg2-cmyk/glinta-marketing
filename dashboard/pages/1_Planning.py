@@ -64,9 +64,9 @@ def _fetch_sheet_campaigns():
         msg = str(_e)
         if "not connected" in msg.lower() or "not configured" in msg.lower():
             return None, None, None  # silently skip — no credentials set up
-        return None, None, msg
+        return None, None, msg or repr(_e)
     except Exception as _e:
-        return None, None, str(_e)
+        return None, None, str(_e) or repr(_e)
 
 
 def _invalidate_sheet_cache():
