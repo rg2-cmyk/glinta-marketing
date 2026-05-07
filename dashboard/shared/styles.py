@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as _components
 
 COLORS = {
     "yellow":   "#f5f000",
@@ -266,60 +267,70 @@ def top_nav(current_page):
         ("pages/5_Execution.py",   "QA Review"),
     ]
 
-    # Build the original pixel-perfect HTML visual nav.
-    # Non-current items use onclick to trigger hidden st.page_link() anchors
-    # so navigation goes through Streamlit's WebSocket (no full page reload).
-    items = ""
+    # Build nav items HTML for the component iframe
+    items_html = ""
     for i, (_, label) in enumerate(pages):
-        is_current = (label.lower() == current_page.lower())
+        is_current = label.lower() == current_page.lower()
         if is_current:
-            items += (
-                f'<span style="font-family:\'Barlow\',sans-serif;font-size:0.82rem;'
-                f'font-weight:600;color:{COLORS["black"]};padding:10px 0;'
-                f'border-bottom:2px solid {COLORS["black"]};white-space:nowrap;">'
+            items_html += (
+                f'<span style="font-family:Barlow,sans-serif;font-size:0.82rem;'
+                f'font-weight:600;color:#000;padding:10px 0;'
+                f'border-bottom:2px solid #000;white-space:nowrap;">'
                 f'{label}</span>'
             )
         else:
-            items += (
-                f'<span onclick="__stNav({i})" '
-                f'style="font-family:\'Barlow\',sans-serif;font-size:0.82rem;'
-                f'font-weight:400;color:#aaaaaa;padding:10px 0;'
+            items_html += (
+                f'<span data-idx="{i}" onclick="navTo({i})"'
+                f' style="font-family:Barlow,sans-serif;font-size:0.82rem;'
+                f'font-weight:400;color:#aaa;padding:10px 0;'
                 f'border-bottom:2px solid transparent;white-space:nowrap;'
-                f'cursor:pointer;transition:color 0.15s;" '
-                f'onmouseover="this.style.color=\'#000000\'" '
-                f'onmouseout="this.style.color=\'#aaaaaa\'">'
+                f'cursor:pointer;transition:color 0.15s;"'
+                f' onmouseover="this.style.color=\'#000\'"'
+                f' onmouseout="this.style.color=\'#aaa\'">'
                 f'{label}</span>'
             )
 
-    labels_js = str([label for _, label in pages]).replace("'", '"')
-    current_lower = current_page.lower()
+    labels_js  = str([lbl for _, lbl in pages]).replace("'", '"')
+    current_lw = current_page.lower()
 
-    st.markdown(
-        f'<div style="display:flex;gap:28px;align-items:flex-end;'
-        f'border-bottom:1px solid {COLORS["border"]};margin-bottom:1.75rem;'
-        f'padding-bottom:0;">{items}</div>'
-        f'<style>'
-        f'div[data-testid="stPageLink"]{{position:absolute;left:-9999px;top:-9999px;}}'
-        f'</style>'
-        f'<script>'
-        f'function __stNav(idx){{'
-        f'  var labels={labels_js};'
-        f'  var cur="{current_lower}";'
-        f'  var links=document.querySelectorAll(\'[data-testid="stPageLink"] a\');'
-        f'  var li=0;'
-        f'  for(var i=0;i<labels.length;i++){{'
-        f'    if(labels[i].toLowerCase()===cur)continue;'
-        f'    if(i===idx){{if(links[li])links[li].click();return;}}'
-        f'    li++;'
-        f'  }}'
-        f'}}'
-        f'</script>',
-        unsafe_allow_html=True,
+    # Render the nav inside a components.html iframe so JS actually executes.
+    # navTo() reaches into window.parent (the Streamlit app iframe) and
+    # programmatically clicks the matching hidden st.page_link() anchor,
+    # which fires Streamlit's WebSocket navigation without a full page reload.
+    _components.html(
+        f"""<!DOCTYPE html><html><head><style>
+body{{margin:0;padding:0;background:#fff;overflow:hidden;}}
+#nav{{display:flex;gap:28px;align-items:flex-end;
+      border-bottom:1px solid #E4E4E4;padding-bottom:0;height:42px;}}
+</style></head><body>
+<div id="nav">{items_html}</div>
+<script>
+var LABELS  = {labels_js};
+var CURRENT = "{current_lw}";
+function navTo(idx) {{
+  var pDoc  = window.parent.document;
+  var links = pDoc.querySelectorAll('[data-testid="stPageLink"] a');
+  var li = 0;
+  for (var i = 0; i < LABELS.length; i++) {{
+    if (LABELS[i].toLowerCase() === CURRENT) continue;
+    if (i === idx) {{ if (links[li]) links[li].click(); return; }}
+    li++;
+  }}
+}}
+</script></body></html>""",
+        height=46,
+        scrolling=False,
     )
 
-    # Hidden st.page_link() elements — positioned off-screen via CSS above,
-    # but still live in the DOM so JS can .click() them for soft navigation.
-    for i, (page_path, label) in enumerate(pages):
+    # Hide the page_link widgets visually (they stay in the DOM for JS).
+    st.markdown(
+        '<style>div[data-testid="stPageLink"]{'
+        'position:absolute;left:-9999px;top:-9999px;}</style>',
+        unsafe_allow_html=True,
+    )
+    st.markdown('<div style="margin-bottom:1.5rem;"></div>', unsafe_allow_html=True)
+
+    for _, (page_path, label) in enumerate(pages):
         if label.lower() != current_page.lower():
             st.page_link(page_path, label=label, icon=None)
 
